@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "id": "economy",
+  "name": "Economy / Save Usage",
+  "aliases": ["economy-save-usage", "save", "save-usage"],
+  "description": "Minimize active routes, context loading, and unnecessary reasoning.",
+  "extends": [],
+  "policy": {
+    "mode": "economy",
+    "reasoning_hint": "low",
+    "max_active_routes": 2,
+    "prefer_explicit_invocation": true
+  },
+  "routes": [
+    {
+      "intent": "troubleshoot",
+      "keywords": ["bug", "error", "failing"],
+      "capability_hints": ["debugging"],
+      "guidance": "Load one diagnostic capability and stop when the cause is established.",
+      "priority": 90
+    },
+    {
+      "intent": "implement",
+      "keywords": ["build", "feature", "fix", "implement"],
+      "capability_hints": ["implementation"],
+      "guidance": "Prefer direct implementation with focused verification.",
+      "priority": 80
+    },
+    {
+      "intent": "review",
+      "keywords": ["diff", "review"],
+      "capability_hints": ["code-review"],
+      "guidance": "Review only the requested scope.",
+      "priority": 70
+    }
+  ]
+}

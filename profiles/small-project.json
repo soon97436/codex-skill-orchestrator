@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "id": "small-project",
+  "name": "Small Project",
+  "aliases": ["small"],
+  "description": "Keep compact repositories moving with minimal orchestration overhead.",
+  "extends": [],
+  "policy": {
+    "mode": "focused",
+    "reasoning_hint": "medium",
+    "max_active_routes": 3,
+    "prefer_explicit_invocation": false
+  },
+  "routes": [
+    {
+      "intent": "implement",
+      "keywords": ["build", "feature", "fix", "implement"],
+      "capability_hints": ["implementation", "test-driven-development"],
+      "guidance": "Work directly in the smallest relevant surface.",
+      "priority": 90
+    },
+    {
+      "intent": "test",
+      "keywords": ["integration test", "test", "verify"],
+      "capability_hints": ["testing"],
+      "guidance": "Add focused tests proportional to the change risk.",
+      "priority": 80
+    },
+    {
+      "intent": "review",
+      "keywords": ["diff", "review"],
+      "capability_hints": ["code-review"],
+      "guidance": "Review the changed files and direct callers.",
+      "priority": 70
+    }
+  ]
+}

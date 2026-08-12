@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "id": "security",
+  "name": "Security",
+  "aliases": ["secure"],
+  "description": "Prioritize threat modeling, dependency review, remediation, and verification.",
+  "extends": [],
+  "policy": {
+    "mode": "security",
+    "reasoning_hint": "high",
+    "max_active_routes": 5,
+    "prefer_explicit_invocation": false
+  },
+  "routes": [
+    {
+      "intent": "threat-model",
+      "keywords": ["abuse", "attack", "threat", "trust boundary"],
+      "capability_hints": ["threat-modeling"],
+      "guidance": "Identify assets, trust boundaries, attacker goals, and mitigations.",
+      "priority": 100
+    },
+    {
+      "intent": "scan",
+      "keywords": ["audit", "scan", "secret", "vulnerability"],
+      "capability_hints": ["security-review"],
+      "guidance": "Begin read-only and preserve evidence without exposing secrets.",
+      "priority": 95
+    },
+    {
+      "intent": "dependency-audit",
+      "keywords": ["dependency", "license", "package", "supply chain"],
+      "capability_hints": ["dependency-security"],
+      "guidance": "Verify provenance, version pins, advisories, and license status.",
+      "priority": 90
+    },
+    {
+      "intent": "remediate",
+      "keywords": ["fix finding", "harden", "mitigate", "remediate"],
+      "capability_hints": ["security-remediation"],
+      "guidance": "Apply the smallest reviewed mitigation with regression coverage.",
+      "priority": 80
+    },
+    {
+      "intent": "verify",
+      "keywords": ["retest", "validate fix", "verification", "verify"],
+      "capability_hints": ["security-verification"],
+      "guidance": "Reproduce the original condition and test likely bypasses.",
+      "priority": 70
+    }
+  ]
+}

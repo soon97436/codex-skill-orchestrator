@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "id": "research",
+  "name": "Research",
+  "aliases": ["sources"],
+  "description": "Prioritize primary-source discovery, synthesis, and citation verification.",
+  "extends": [],
+  "policy": {
+    "mode": "research",
+    "reasoning_hint": "high",
+    "max_active_routes": 4,
+    "prefer_explicit_invocation": false
+  },
+  "routes": [
+    {
+      "intent": "discover",
+      "keywords": ["discover", "find sources", "literature", "search"],
+      "capability_hints": ["source-discovery"],
+      "guidance": "Start with authoritative primary sources and record provenance.",
+      "priority": 100
+    },
+    {
+      "intent": "synthesize",
+      "keywords": ["compare", "evidence", "research", "synthesize"],
+      "capability_hints": ["primary-source-research"],
+      "guidance": "Separate established facts, source disagreement, and inference.",
+      "priority": 90
+    },
+    {
+      "intent": "verify-citations",
+      "keywords": ["citation", "fact check", "source check", "verify"],
+      "capability_hints": ["citation-verification"],
+      "guidance": "Open the cited primary source and confirm direct support.",
+      "priority": 80
+    },
+    {
+      "intent": "report",
+      "keywords": ["brief", "memo", "report", "write up"],
+      "capability_hints": ["research-reporting"],
+      "guidance": "Produce a concise, source-linked artifact with limitations.",
+      "priority": 70
+    }
+  ]
+}

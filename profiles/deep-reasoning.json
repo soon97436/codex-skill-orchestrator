@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "id": "deep-reasoning",
+  "name": "Deep Reasoning",
+  "aliases": ["deep", "reasoning"],
+  "description": "Broaden analysis, verification, and competing-hypothesis checks for hard work.",
+  "extends": [],
+  "policy": {
+    "mode": "deep",
+    "reasoning_hint": "high",
+    "max_active_routes": 6,
+    "prefer_explicit_invocation": false
+  },
+  "routes": [
+    {
+      "intent": "investigate",
+      "keywords": ["analyze", "diagnose", "investigate", "root cause"],
+      "capability_hints": ["debugging", "hypothesis-testing"],
+      "guidance": "Maintain competing hypotheses and gather discriminating evidence.",
+      "priority": 100
+    },
+    {
+      "intent": "architecture",
+      "keywords": ["architecture", "boundaries", "design", "tradeoff"],
+      "capability_hints": ["architecture-analysis"],
+      "guidance": "Map dependencies and evaluate alternatives before changing structure.",
+      "priority": 90
+    },
+    {
+      "intent": "research",
+      "keywords": ["evidence", "paper", "research", "sources"],
+      "capability_hints": ["primary-source-research"],
+      "guidance": "Use primary sources and reconcile conflicting evidence.",
+      "priority": 80
+    },
+    {
+      "intent": "verify",
+      "keywords": ["prove", "validate", "verification", "verify"],
+      "capability_hints": ["independent-verification"],
+      "guidance": "Seek an independent check rather than repeating the same reasoning path.",
+      "priority": 70
+    }
+  ]
+}

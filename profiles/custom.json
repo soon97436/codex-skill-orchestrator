@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "id": "custom",
+  "name": "Custom",
+  "aliases": ["user-defined"],
+  "description": "Extend Universal with a safe user-maintained routing slot.",
+  "extends": ["universal"],
+  "policy": {
+    "mode": "custom",
+    "reasoning_hint": "medium",
+    "max_active_routes": 4,
+    "prefer_explicit_invocation": true
+  },
+  "routes": [
+    {
+      "intent": "custom-workflow",
+      "keywords": ["custom", "profile", "workflow"],
+      "capability_hints": ["user-defined-workflow"],
+      "guidance": "Use only a locally reviewed capability explicitly selected by the user.",
+      "priority": 50
+    }
+  ]
+}

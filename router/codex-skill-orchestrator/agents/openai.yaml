@@ -1,0 +1,4 @@
+interface:
+  display_name: "Codex Skill Orchestrator"
+  short_description: "Choose lightweight agent skill profiles"
+  default_prompt: "Use $codex-skill-orchestrator to select and apply the best skill profile for this task."

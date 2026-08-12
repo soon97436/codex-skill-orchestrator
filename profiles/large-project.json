@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "id": "large-project",
+  "name": "Large Project",
+  "aliases": ["large"],
+  "description": "Route complex repositories through architecture, dependency, staged work, and integration checks.",
+  "extends": [],
+  "policy": {
+    "mode": "scaled",
+    "reasoning_hint": "high",
+    "max_active_routes": 5,
+    "prefer_explicit_invocation": false
+  },
+  "routes": [
+    {
+      "intent": "architecture",
+      "keywords": ["architecture", "boundary", "module", "subsystem"],
+      "capability_hints": ["architecture-analysis"],
+      "guidance": "Map ownership and dependency boundaries before editing.",
+      "priority": 100
+    },
+    {
+      "intent": "dependency-map",
+      "keywords": ["call graph", "dependency", "impact", "relationship"],
+      "capability_hints": ["dependency-analysis"],
+      "guidance": "Trace upstream and downstream consumers of the proposed change.",
+      "priority": 90
+    },
+    {
+      "intent": "plan",
+      "keywords": ["migration", "plan", "roadmap", "stage"],
+      "capability_hints": ["implementation-planning"],
+      "guidance": "Split work into independently verifiable stages.",
+      "priority": 80
+    },
+    {
+      "intent": "integration-test",
+      "keywords": ["end to end", "integration", "regression", "test"],
+      "capability_hints": ["integration-testing"],
+      "guidance": "Verify affected boundaries and critical end-to-end paths.",
+      "priority": 70
+    },
+    {
+      "intent": "review",
+      "keywords": ["diff", "pull request", "review"],
+      "capability_hints": ["code-review"],
+      "guidance": "Review standards, specification, and cross-module impact.",
+      "priority": 60
+    }
+  ]
+}

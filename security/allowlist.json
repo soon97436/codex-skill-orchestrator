@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "allowed_source_types": ["bundled"],
+  "allowed_remote_hosts": [],
+  "allowed_spdx_licenses": ["MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC"],
+  "require_checksums": true,
+  "require_immutable_revision_for_remote": true,
+  "deny_network_in_phase_1": true
+}

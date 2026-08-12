@@ -1,0 +1,8 @@
+* text=auto
+
+# Keep POSIX entry points executable and free of CRLF shebang failures.
+*.sh text eol=lf
+installer/cso text eol=lf
+
+# Keep native Windows entry points conventional on checkout.
+*.ps1 text eol=crlf

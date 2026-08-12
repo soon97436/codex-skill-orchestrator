@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "id": "universal",
+  "name": "Universal",
+  "aliases": ["default"],
+  "description": "Balanced routing for everyday development and knowledge work.",
+  "extends": [],
+  "policy": {
+    "mode": "balanced",
+    "reasoning_hint": "medium",
+    "max_active_routes": 4,
+    "prefer_explicit_invocation": false
+  },
+  "routes": [
+    {
+      "intent": "troubleshoot",
+      "keywords": ["bug", "crash", "debug", "error", "failing", "slow"],
+      "capability_hints": ["debugging"],
+      "guidance": "Establish a reproducible feedback loop before proposing a fix.",
+      "priority": 90
+    },
+    {
+      "intent": "implement",
+      "keywords": ["build", "change", "feature", "fix", "implement", "refactor"],
+      "capability_hints": ["implementation", "test-driven-development"],
+      "guidance": "Use the smallest implementation and verification workflow that fits the task.",
+      "priority": 80
+    },
+    {
+      "intent": "review",
+      "keywords": ["diff", "pull request", "review", "spec", "standards"],
+      "capability_hints": ["code-review"],
+      "guidance": "Review against repository standards and the originating requirement.",
+      "priority": 70
+    },
+    {
+      "intent": "research",
+      "keywords": ["compare", "docs", "evidence", "research", "sources"],
+      "capability_hints": ["primary-source-research"],
+      "guidance": "Prefer authoritative primary sources and distinguish facts from inference.",
+      "priority": 60
+    },
+    {
+      "intent": "security",
+      "keywords": ["credential", "dependency", "secret", "security", "threat", "vulnerability"],
+      "capability_hints": ["security-review"],
+      "guidance": "Use read-only discovery first and fail closed on uncertain trust decisions.",
+      "priority": 100
+    }
+  ]
+}

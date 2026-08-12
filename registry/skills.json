@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "skills": [
+    {
+      "id": "codex-skill-orchestrator",
+      "name": "Codex Skill Orchestrator",
+      "description": "First-party lightweight profile router bundled with this project.",
+      "version": "0.1.0",
+      "source": {
+        "type": "bundled",
+        "path": "router/codex-skill-orchestrator",
+        "repository": null,
+        "revision": null
+      },
+      "license": {
+        "spdx": "MIT",
+        "license_file": "LICENSE",
+        "source_url": null,
+        "redistribution": true
+      },
+      "provenance": {
+        "publisher": "Codex Skill Orchestrator contributors",
+        "maintainer": "Codex Skill Orchestrator contributors",
+        "third_party": false
+      },
+      "files": [
+        {
+          "path": "SKILL.md",
+          "sha256": "8516889f84ddce7263bb2e4af4b8a184790821b76c03c57e8ed3bafc7b11cdbb"
+        },
+        {
+          "path": "agents/openai.yaml",
+          "sha256": "4491487d18d6f13cc6d97bd4023a0d394b176b8b19a6581ca5ebb6f7f6261841"
+        },
+        {
+          "path": "references/profiles.md",
+          "sha256": "d261d1b8fd5be19e8015923c56cc8633a8c99baecc49de1ed122a2a81bda060c"
+        }
+      ]
+    }
+  ]
+}
