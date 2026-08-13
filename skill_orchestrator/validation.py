@@ -57,6 +57,13 @@ REGISTRY_ENTRY_KEYS = {
     "provenance",
     "files",
 }
+OPTIONAL_REGISTRY_ENTRY_KEYS = {"capabilities"}
+CAPABILITY_SCOPES = {"project", "workspace", "unrestricted"}
+NETWORK_MODES = {"none", "localhost", "restricted", "unrestricted", "unknown"}
+PROCESS_MODES = {"none", "commands", "arbitrary", "unknown"}
+MAX_CAPABILITY_SCOPES = 64
+MAX_CAPABILITY_COMMANDS = 64
+COMMAND_LITERAL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]*$")
 
 
 def _reject_duplicate_keys(pairs: Iterable[Tuple[str, Any]]) -> Dict[str, Any]:
@@ -153,6 +160,25 @@ def _expect_exact_keys(document: Mapping[str, Any], expected: set, label: str) -
         raise ValidationError(f"{label} must be an object")
     missing = expected - set(document)
     extra = set(document) - expected
+    if missing or extra:
+        details = []
+        if missing:
+            details.append("missing " + ", ".join(sorted(missing)))
+        if extra:
+            details.append("unknown " + ", ".join(sorted(extra)))
+        raise ValidationError(f"{label}: {'; '.join(details)}")
+
+
+def _expect_required_optional_keys(
+    document: Mapping[str, Any],
+    required: set,
+    optional: set,
+    label: str,
+) -> None:
+    if not isinstance(document, dict):
+        raise ValidationError(f"{label} must be an object")
+    missing = required - set(document)
+    extra = set(document) - required - optional
     if missing or extra:
         details = []
         if missing:
@@ -331,6 +357,46 @@ def _validate_allowlist(document: Mapping[str, Any]) -> None:
             raise ValidationError(f"allowlist {key} must be boolean")
 
 
+def _validate_capabilities(document: Mapping[str, Any], skill_id: str) -> None:
+    label = f"registry {skill_id} capabilities"
+    _expect_exact_keys(
+        document,
+        {"schema_version", "filesystem", "network", "process"},
+        label,
+    )
+    if document["schema_version"] != 1:
+        raise ValidationError(f"{label} has unsupported schema_version")
+
+    filesystem = document["filesystem"]
+    _expect_exact_keys(filesystem, {"read", "write"}, f"{label} filesystem")
+    for access in ("read", "write"):
+        scopes = _expect_string_list(
+            filesystem[access],
+            f"{label} filesystem {access}",
+        )
+        if len(scopes) > MAX_CAPABILITY_SCOPES or any(
+            scope not in CAPABILITY_SCOPES for scope in scopes
+        ):
+            raise ValidationError(f"{label} filesystem {access} has invalid scope")
+
+    network = document["network"]
+    _expect_exact_keys(network, {"mode"}, f"{label} network")
+    if network["mode"] not in NETWORK_MODES:
+        raise ValidationError(f"{label} network has invalid mode")
+
+    process = document["process"]
+    _expect_exact_keys(process, {"mode", "commands"}, f"{label} process")
+    if process["mode"] not in PROCESS_MODES:
+        raise ValidationError(f"{label} process has invalid mode")
+    commands = _expect_string_list(process["commands"], f"{label} process commands")
+    if len(commands) > MAX_CAPABILITY_COMMANDS or any(
+        not COMMAND_LITERAL_RE.fullmatch(command) for command in commands
+    ):
+        raise ValidationError(f"{label} process has invalid command literal")
+    if (process["mode"] == "commands") != bool(commands):
+        raise ValidationError(f"{label} process mode and commands are inconsistent")
+
+
 def validate_registry(project_root: Path) -> Dict[str, Any]:
     registry = load_json(project_root / "registry" / "skills.json")
     _expect_exact_keys(registry, {"schema_version", "skills"}, "registry")
@@ -347,7 +413,12 @@ def validate_registry(project_root: Path) -> Dict[str, Any]:
     seen_names = set()
     validated: Dict[str, Dict[str, Any]] = {}
     for entry in registry["skills"]:
-        _expect_exact_keys(entry, REGISTRY_ENTRY_KEYS, "registry entry")
+        _expect_required_optional_keys(
+            entry,
+            REGISTRY_ENTRY_KEYS,
+            OPTIONAL_REGISTRY_ENTRY_KEYS,
+            "registry entry",
+        )
         skill_id = _expect_string(entry["id"], "registry skill id")
         name = _expect_string(entry["name"], f"registry {skill_id} name")
         if not IDENTIFIER_RE.fullmatch(skill_id) or skill_id in seen_ids or name.casefold() in seen_names:
@@ -357,6 +428,8 @@ def validate_registry(project_root: Path) -> Dict[str, Any]:
         _expect_string(entry["description"], f"registry {skill_id} description")
         if not isinstance(entry["version"], str) or not SEMVER_RE.fullmatch(entry["version"]):
             raise ValidationError(f"registry {skill_id} has invalid version")
+        if "capabilities" in entry:
+            _validate_capabilities(entry["capabilities"], skill_id)
 
         source = entry["source"]
         _expect_exact_keys(source, {"type", "path", "repository", "revision"}, f"registry {skill_id} source")

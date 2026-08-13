@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Mapping, Sequence, Tuple
 
 from .analyzer import analyze_project
+from .capabilities import analyze_capabilities
 from .context import normalize_scope_identity
 from .errors import SecurityError
 from .validation import validate_registry, validate_relative_path
@@ -569,4 +570,5 @@ def analyze_and_recommend(project_root: Path, source_root: Path) -> Dict[str, An
         "recommended_skills": evaluation["selected"],
         "recommendations_complete": recommendations_complete(analysis),
         "recommendation_explanations": evaluation["explanations"],
+        "capability_analysis": analyze_capabilities(registry),
     }

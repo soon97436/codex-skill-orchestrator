@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from skill_orchestrator.errors import IntegrityError, SecurityError
+from skill_orchestrator.errors import IntegrityError, SecurityError, ValidationError
 from skill_orchestrator.validation import validate_registry
 
 
@@ -19,6 +19,67 @@ def copy_registry_fixture(destination: Path) -> None:
 
 
 class RegistryTests(unittest.TestCase):
+    def test_optional_capability_manifest_is_validated(self) -> None:
+        schema = json.loads((ROOT / "registry" / "schema.json").read_text(encoding="utf-8"))
+        entry_schema = schema["properties"]["skills"]["items"]
+        self.assertIn("capabilities", entry_schema["properties"])
+        self.assertNotIn("capabilities", entry_schema["required"])
+        self.assertFalse(entry_schema["properties"]["capabilities"]["additionalProperties"])
+
+        with tempfile.TemporaryDirectory(prefix="cso-registry-") as temporary:
+            fixture = Path(temporary)
+            copy_registry_fixture(fixture)
+            path = fixture / "registry" / "skills.json"
+            document = json.loads(path.read_text(encoding="utf-8"))
+            document["skills"][0]["capabilities"] = {
+                "schema_version": 1,
+                "filesystem": {"read": ["project"], "write": []},
+                "network": {"mode": "none"},
+                "process": {"mode": "commands", "commands": ["pytest"]},
+            }
+            path.write_text(json.dumps(document), encoding="utf-8")
+
+            registry = validate_registry(fixture)
+
+        self.assertEqual(
+            registry["codex-skill-orchestrator"]["capabilities"]["network"]["mode"],
+            "none",
+        )
+
+    def test_invalid_capability_manifest_fails_closed(self) -> None:
+        invalid_manifests = [
+            {
+                "schema_version": 1,
+                "filesystem": {"read": ["/srv/private"], "write": []},
+                "network": {"mode": "none"},
+                "process": {"mode": "none", "commands": []},
+            },
+            {
+                "schema_version": 1,
+                "filesystem": {"read": [], "write": []},
+                "network": {"mode": "none"},
+                "process": {"mode": "commands", "commands": ["pytest -q"]},
+            },
+            {
+                "schema_version": 1,
+                "filesystem": {"read": [], "write": []},
+                "network": {"mode": "none"},
+                "process": {"mode": "arbitrary", "commands": ["pytest"]},
+            },
+        ]
+        for manifest in invalid_manifests:
+            with self.subTest(manifest=manifest):
+                with tempfile.TemporaryDirectory(prefix="cso-registry-") as temporary:
+                    fixture = Path(temporary)
+                    copy_registry_fixture(fixture)
+                    path = fixture / "registry" / "skills.json"
+                    document = json.loads(path.read_text(encoding="utf-8"))
+                    document["skills"][0]["capabilities"] = manifest
+                    path.write_text(json.dumps(document), encoding="utf-8")
+
+                    with self.assertRaises(ValidationError):
+                        validate_registry(fixture)
+
     def test_checksummed_payloads_are_checked_out_as_lf(self) -> None:
         registry = json.loads((ROOT / "registry" / "skills.json").read_text(encoding="utf-8"))
         paths = [

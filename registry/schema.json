@@ -49,6 +49,65 @@
               "third_party": { "type": "boolean" }
             }
           },
+          "capabilities": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["schema_version", "filesystem", "network", "process"],
+            "properties": {
+              "schema_version": { "const": 1 },
+              "filesystem": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["read", "write"],
+                "properties": {
+                  "read": {
+                    "type": "array",
+                    "maxItems": 64,
+                    "uniqueItems": true,
+                    "items": { "enum": ["project", "workspace", "unrestricted"] }
+                  },
+                  "write": {
+                    "type": "array",
+                    "maxItems": 64,
+                    "uniqueItems": true,
+                    "items": { "enum": ["project", "workspace", "unrestricted"] }
+                  }
+                }
+              },
+              "network": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["mode"],
+                "properties": {
+                  "mode": { "enum": ["none", "localhost", "restricted", "unrestricted", "unknown"] }
+                }
+              },
+              "process": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["mode", "commands"],
+                "properties": {
+                  "mode": { "enum": ["none", "commands", "arbitrary", "unknown"] },
+                  "commands": {
+                    "type": "array",
+                    "maxItems": 64,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._+-]*$"
+                    }
+                  }
+                },
+                "allOf": [
+                  {
+                    "if": { "properties": { "mode": { "const": "commands" } } },
+                    "then": { "properties": { "commands": { "minItems": 1 } } },
+                    "else": { "properties": { "commands": { "maxItems": 0 } } }
+                  }
+                ]
+              }
+            }
+          },
           "files": {
             "type": "array",
             "minItems": 1,
