@@ -116,7 +116,10 @@ class AnalyzerTests(unittest.TestCase):
             result = analyze_project(root)
 
         self.assertNotIn("rust", {item["technology"] for item in result["detected"]})
-        self.assertEqual(result["warnings"], ["Skipped link or reparse point: escaped"])
+        self.assertEqual(
+            result["warnings"],
+            ["Skipped link or reparse point: escaped", "context-unsafe-path: escaped"],
+        )
 
     def test_project_root_link_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory(prefix="cso-analyze-") as temporary:

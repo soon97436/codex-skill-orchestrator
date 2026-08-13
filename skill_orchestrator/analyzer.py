@@ -2,18 +2,17 @@
 
 from __future__ import annotations
 
-import heapq
 import json
 import os
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, MutableMapping, Set, Tuple
 
-from .context import discover_context
+from .context import MAX_CONTEXT_SCAN_ENTRIES, discover_context
 from .errors import SecurityError, ValidationError
 from .validation import is_reparse_point
 
 
-MAX_ENTRIES = 50_000
+MAX_ENTRIES = MAX_CONTEXT_SCAN_ENTRIES
 MAX_METADATA_BYTES = 1_000_000
 SMALL_PROJECT_THRESHOLD = 100
 LARGE_PROJECT_THRESHOLD = 1_000
@@ -86,40 +85,42 @@ def _walk_files(
     root: Path,
     max_entries: int,
     warnings: List[str],
-) -> Tuple[List[Tuple[Path, str]], List[str], bool]:
+) -> Tuple[List[Tuple[Path, str]], List[str], List[str], bool]:
     files: List[Tuple[Path, str]] = []
     directory_paths: List[str] = []
+    unsafe_paths: List[str] = []
     pending = [root]
-    visited = 0
+    scanned = 0
     truncated = False
     while pending:
         current = pending.pop()
-        remaining = max_entries - visited
+        remaining = max_entries - scanned
         if remaining <= 0:
             truncated = True
             break
         try:
             with os.scandir(current) as iterator:
-                entries = heapq.nsmallest(
-                    remaining + 1,
-                    (entry for entry in iterator if entry.name.casefold() not in EXCLUDED_DIRECTORIES),
-                    key=lambda entry: (entry.name.casefold(), entry.name),
-                )
+                entries = []
+                for entry in iterator:
+                    scanned += 1
+                    if scanned > max_entries:
+                        truncated = True
+                        break
+                    if entry.name.casefold() not in EXCLUDED_DIRECTORIES:
+                        entries.append(entry)
         except OSError:
             relative = current.relative_to(root).as_posix() or "."
             warnings.append(f"Skipped unreadable directory: {relative}")
             continue
         directories: List[Path] = []
-        if len(entries) > remaining:
-            entries = entries[:remaining]
-            truncated = True
+        entries.sort(key=lambda entry: (entry.name.casefold(), entry.name))
         for entry in entries:
-            visited += 1
             path = Path(entry.path)
             relative = path.relative_to(root).as_posix()
             try:
                 if entry.is_symlink() or is_reparse_point(path):
                     warnings.append(f"Skipped link or reparse point: {relative}")
+                    unsafe_paths.append(relative)
                 elif entry.is_dir(follow_symlinks=False):
                     directories.append(path)
                     directory_paths.append(relative)
@@ -131,7 +132,7 @@ def _walk_files(
             break
         pending.extend(reversed(directories))
     files.sort(key=lambda item: item[1])
-    return files, sorted(directory_paths), truncated
+    return files, sorted(directory_paths), sorted(unsafe_paths), truncated
 
 
 def analyze_project(root: Path, *, max_entries: int = MAX_ENTRIES) -> Dict[str, Any]:
@@ -145,11 +146,13 @@ def analyze_project(root: Path, *, max_entries: int = MAX_ENTRIES) -> Dict[str, 
     root = lexical_root.resolve(strict=True)
 
     warnings: List[str] = []
-    files, directories, truncated = _walk_files(root, max_entries, warnings)
-    context = discover_context(files, warnings)
-    if truncated:
-        context["truncated"] = True
-        warnings.append("Context discovery incomplete because project traversal was truncated")
+    files, directories, unsafe_paths, truncated = _walk_files(root, max_entries, warnings)
+    context = discover_context(
+        files,
+        warnings,
+        unsafe_paths=unsafe_paths,
+        traversal_truncated=truncated,
+    )
     detected: Dict[str, Set[str]] = {}
     tests: Dict[str, Set[str]] = {}
 

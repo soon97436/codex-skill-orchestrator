@@ -22,7 +22,6 @@ class RecommendationTests(unittest.TestCase):
                         "path": "AGENTS.md",
                         "kind": "agent-instructions",
                         "scope": ".",
-                        "size_bytes": 100,
                     }
                 ],
                 "truncated": False,

@@ -74,6 +74,7 @@ class PhaseTwoCliTests(unittest.TestCase):
         self.assertIn("AGENTS.md", result.stdout)
         self.assertIn("agent-instructions", result.stdout)
         self.assertIn("scope: .", result.stdout)
+        self.assertNotIn("bytes", result.stdout)
         self.assertNotIn(str(project), result.stdout)
 
     def test_init_yes_creates_only_expected_configuration(self) -> None:

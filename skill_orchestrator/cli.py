@@ -153,8 +153,7 @@ def _human_analysis(document: Mapping[str, Any]) -> str:
     if context["evidence"]:
         for evidence in context["evidence"]:
             lines.append(
-                f"  {evidence['path']} ({evidence['kind']}; scope: {evidence['scope']}; "
-                f"{evidence['size_bytes']} bytes)"
+                f"  {evidence['path']} ({evidence['kind']}; scope: {evidence['scope']})"
             )
     else:
         lines.append("  No known agent context files discovered.")
