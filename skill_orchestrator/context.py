@@ -17,28 +17,36 @@ MAX_CONTEXT_FILE_BYTES = 256_000
 MAX_CONTEXT_SCAN_ENTRIES = 50_000
 
 
-def _normalized_scope_parts(scope: str) -> Tuple[str, ...]:
+def normalize_scope_identity(scope: str) -> Tuple[str, ...]:
     if scope == ".":
         return ()
     return tuple(unicodedata.normalize("NFC", part).casefold() for part in scope.split("/"))
+
+
+def scope_contains(parent: str, child: str) -> bool:
+    if parent == "unknown" or child == "unknown":
+        return False
+    parent_identity = normalize_scope_identity(parent)
+    child_identity = normalize_scope_identity(child)
+    return child_identity[: len(parent_identity)] == parent_identity
 
 
 def _scope_overlaps(evidence: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
     known = [item for item in evidence if item["scope_state"] != "unknown"]
     known.sort(
         key=lambda item: (
-            len(_normalized_scope_parts(item["scope"])),
-            _normalized_scope_parts(item["scope"]),
+            len(normalize_scope_identity(item["scope"])),
+            normalize_scope_identity(item["scope"]),
             unicodedata.normalize("NFC", item["path"]).casefold(),
             item["path"],
         )
     )
     overlaps: List[Dict[str, Any]] = []
     for index, ancestor in enumerate(known):
-        ancestor_parts = _normalized_scope_parts(ancestor["scope"])
+        ancestor_parts = normalize_scope_identity(ancestor["scope"])
         for descendant in known[index + 1 :]:
-            descendant_parts = _normalized_scope_parts(descendant["scope"])
-            if descendant_parts[: len(ancestor_parts)] != ancestor_parts:
+            descendant_parts = normalize_scope_identity(descendant["scope"])
+            if not scope_contains(ancestor["scope"], descendant["scope"]):
                 continue
             relationship = "same-scope" if descendant_parts == ancestor_parts else "ancestor-descendant"
             overlaps.append(
@@ -57,7 +65,7 @@ def _conflict_sort_key(conflict: Dict[str, Any]) -> Tuple[Any, ...]:
     return (
         severity_order.get(conflict["severity"], 99),
         conflict["type"],
-        _normalized_scope_parts(conflict["scope"]) if conflict["scope"] != "unknown" else ("~unknown",),
+        normalize_scope_identity(conflict["scope"]) if conflict["scope"] != "unknown" else ("~unknown",),
         tuple(unicodedata.normalize("NFC", path).casefold() for path in conflict["paths"]),
         tuple(conflict["paths"]),
     )

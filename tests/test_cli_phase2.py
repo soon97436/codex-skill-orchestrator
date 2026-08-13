@@ -46,7 +46,108 @@ def run_cso(project: Path, *arguments: str) -> subprocess.CompletedProcess:
     )
 
 
+def run_cso_bytes(
+    project: Path,
+    *arguments: str,
+    simulate_windows_newlines: bool = False,
+) -> subprocess.CompletedProcess:
+    environment = dict(os.environ)
+    environment["PYTHONDONTWRITEBYTECODE"] = "1"
+    environment["PYTHONPATH"] = str(ROOT)
+    if simulate_windows_newlines:
+        script = (
+            "import io, sys; "
+            "sys.stdout = io.TextIOWrapper("
+            "sys.stdout.buffer, encoding='utf-8', newline='\\r\\n', write_through=True); "
+            "from skill_orchestrator.cli import main; "
+            "raise SystemExit(main(sys.argv[1:]))"
+        )
+        command = [sys.executable, "-c", script, *arguments]
+    else:
+        command = [sys.executable, "-m", "skill_orchestrator", *arguments]
+    return subprocess.run(
+        command,
+        cwd=project,
+        env=environment,
+        stdin=subprocess.DEVNULL,
+        check=False,
+        capture_output=True,
+        text=False,
+    )
+
+
 class PhaseTwoCliTests(unittest.TestCase):
+    def test_json_stdout_is_utf8_without_bom(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="cso-cli-") as temporary:
+            project = Path(temporary)
+            context = project / "café"
+            context.mkdir()
+            (context / "AGENTS.md").write_text("instructions\n", encoding="utf-8")
+
+            result = run_cso_bytes(project, "analyze", "--json")
+
+        self.assertEqual(result.returncode, 0, result.stderr.decode("utf-8"))
+        self.assertFalse(result.stdout.startswith(b"\xef\xbb\xbf"))
+        decoded = result.stdout.decode("utf-8")
+        self.assertIn("café/AGENTS.md", decoded)
+        self.assertEqual(json.loads(decoded)["context"]["evidence"][0]["path"], "café/AGENTS.md")
+
+    def test_json_stdout_has_exactly_one_trailing_lf(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="cso-cli-") as temporary:
+            result = run_cso_bytes(Path(temporary), "analyze", "--json")
+
+        self.assertEqual(result.returncode, 0, result.stderr.decode("utf-8"))
+        self.assertTrue(result.stdout.endswith(b"\n"))
+        self.assertFalse(result.stdout.endswith(b"\n\n"))
+
+    def test_json_stdout_is_byte_deterministic(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="cso-cli-") as temporary:
+            project = Path(temporary)
+            (project / "package.json").write_text("{}", encoding="utf-8")
+
+            first = run_cso_bytes(
+                project,
+                "analyze",
+                "--json",
+                simulate_windows_newlines=True,
+            )
+            second = run_cso_bytes(
+                project,
+                "analyze",
+                "--json",
+                simulate_windows_newlines=True,
+            )
+
+        self.assertEqual(first.returncode, 0, first.stderr.decode("utf-8"))
+        self.assertEqual(second.returncode, 0, second.stderr.decode("utf-8"))
+        self.assertEqual(first.stdout, second.stdout)
+
+    def test_json_stdout_uses_canonical_lf(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="cso-cli-") as temporary:
+            project = Path(temporary)
+            (project / "pyproject.toml").write_text("[project]\nname='demo'\n", encoding="utf-8")
+
+            result = run_cso_bytes(
+                project,
+                "analyze",
+                "--json",
+                simulate_windows_newlines=True,
+            )
+
+        self.assertEqual(result.returncode, 0, result.stderr.decode("utf-8"))
+        self.assertNotIn(b"\r\n", result.stdout)
+        self.assertNotIn(b"\r", result.stdout)
+        self.assertIn(b"\n", result.stdout)
+
+    def test_json_stdout_supports_text_only_streams(self) -> None:
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            exit_code = main(["profiles", "--json"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(output.getvalue().endswith("\n"))
+        self.assertIsInstance(json.loads(output.getvalue()), list)
+
     def test_analyze_json_is_machine_readable_and_deterministic(self) -> None:
         with tempfile.TemporaryDirectory(prefix="cso-cli-") as temporary:
             project = Path(temporary)

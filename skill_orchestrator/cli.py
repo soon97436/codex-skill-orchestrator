@@ -215,9 +215,24 @@ def _human_doctor(document: Mapping[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _write_json_stdout(document: Any, stream: Optional[Any] = None) -> None:
+    output = sys.stdout if stream is None else stream
+    payload = (
+        json.dumps(document, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    ).encode("utf-8")
+    binary_output = getattr(output, "buffer", None)
+    if binary_output is not None:
+        output.flush()
+        binary_output.write(payload)
+        binary_output.flush()
+        return
+    output.write(payload.decode("utf-8"))
+    output.flush()
+
+
 def _emit(document: Any, as_json: bool) -> None:
     if as_json:
-        print(json.dumps(document, ensure_ascii=False, indent=2, sort_keys=True))
+        _write_json_stdout(document)
     else:
         print(_human_output(document))
 
