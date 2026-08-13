@@ -12,31 +12,10 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
-$pythonExecutable = $null
-$pythonPrefix = @()
-
-function Test-PythonCandidate {
-    param([string]$Executable, [string[]]$Prefix)
-    & $Executable @Prefix -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 9) else 1)' 2>$null
-    return $LASTEXITCODE -eq 0
-}
-
-$candidates = @(
-    @{ Name = 'py'; Prefix = @('-3') },
-    @{ Name = 'python3'; Prefix = @() },
-    @{ Name = 'python'; Prefix = @() }
-)
-foreach ($candidate in $candidates) {
-    $command = Get-Command $candidate.Name -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($command -and (Test-PythonCandidate -Executable $command.Source -Prefix $candidate.Prefix)) {
-        $pythonExecutable = $command.Source
-        $pythonPrefix = $candidate.Prefix
-        break
-    }
-}
-if (-not $pythonExecutable) {
-    throw 'Python 3.9 or newer is required.'
-}
+. (Join-Path $PSScriptRoot 'python-discovery.ps1')
+$python = Find-CsoPython
+$pythonExecutable = $python.Executable
+$pythonPrefix = @($python.Prefix)
 
 $command = $Action.ToLowerInvariant()
 $arguments = @('-m', 'skill_orchestrator', $command)

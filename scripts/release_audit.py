@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read-only public-release audit for secrets, private paths, and license metadata."""
+"""Read-only release audit for project integrity, secrets, private paths, and licenses."""
 
 from __future__ import annotations
 
@@ -22,6 +22,7 @@ REQUIRED_FILES = {
     ".gitignore",
     "SECURITY.md",
     "CONTRIBUTING.md",
+    "HANDOFF.md",
 }
 SUSPICIOUS_NAMES = re.compile(
     r"(?i)(^|/)(?:\.env(?:\..*)?|\.npmrc|\.pypirc|\.netrc|\.git-credentials|"
@@ -175,10 +176,32 @@ def license_findings() -> List[Dict[str, object]]:
     return findings
 
 
+def project_validation_findings() -> List[Dict[str, object]]:
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    from skill_orchestrator.errors import OrchestratorError
+    from skill_orchestrator.validation import validate_project
+
+    try:
+        validate_project(ROOT)
+    except OrchestratorError as exc:
+        return [
+            {
+                "scope": "working-tree",
+                "file": "registry/skills.json",
+                "line": None,
+                "category": "project-integrity",
+                "detail": str(exc),
+            }
+        ]
+    return []
+
+
 def audit() -> Dict[str, object]:
     findings = scan_working_tree()
     findings.extend(scan_history())
     findings.extend(license_findings())
+    findings.extend(project_validation_findings())
     for filename in sorted(REQUIRED_FILES):
         if not (ROOT / filename).is_file():
             findings.append({"scope": "working-tree", "file": filename, "line": None, "category": "required-file-missing"})
@@ -212,7 +235,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print(f"Tracked files: {result['tracked_files']}")
         for finding in result["findings"]:
             suffix = f":{finding['line']}" if finding["line"] is not None else ""
-            print(f"- {finding['category']}: {finding['file']}{suffix} [{finding['scope']}]")
+            detail = f" — {finding['detail']}" if finding.get("detail") else ""
+            print(f"- {finding['category']}: {finding['file']}{suffix} [{finding['scope']}]{detail}")
     return 0 if result["status"] == "clean" else 4
 
 

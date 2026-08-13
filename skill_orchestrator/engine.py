@@ -8,6 +8,7 @@ import os
 import secrets
 import shutil
 import sys
+import tempfile
 from contextlib import AbstractContextManager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -35,6 +36,7 @@ APP_FILES = ("LICENSE", "THIRD_PARTY.md")
 LAUNCHER_FILES = {
     "installer/cso.py": "bin/cso.py",
     "installer/cso.ps1": "bin/cso.ps1",
+    "installer/python-discovery.ps1": "bin/python-discovery.ps1",
     "installer/cso": "bin/cso",
 }
 
@@ -82,7 +84,25 @@ def _check_existing_ancestors(path: Path, label: str) -> None:
         cursor = cursor.parent
     for item in existing:
         if is_reparse_point(item):
+            if _is_macos_system_temp_alias(item, cursor=Path(os.path.abspath(str(path.expanduser())))):
+                continue
             raise SecurityError(f"{label} traverses a symlink or reparse point")
+
+
+def _is_macos_system_temp_alias(item: Path, *, cursor: Path) -> bool:
+    if sys.platform != "darwin":
+        return False
+    temporary_root = Path(os.path.abspath(tempfile.gettempdir()))
+    try:
+        cursor.relative_to(temporary_root)
+    except ValueError:
+        return False
+    aliases = {
+        Path("/var"): Path("/private/var"),
+        Path("/tmp"): Path("/private/tmp"),
+    }
+    expected = aliases.get(item)
+    return expected is not None and item.resolve(strict=True) == expected
 
 
 def validate_destination_roots(

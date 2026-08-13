@@ -4,5 +4,10 @@
 *.sh text eol=lf
 installer/cso text eol=lf
 
+# Checksums use Git-canonical LF bytes on every supported platform.
+router/codex-skill-orchestrator/SKILL.md text eol=lf
+router/codex-skill-orchestrator/agents/openai.yaml text eol=lf
+router/codex-skill-orchestrator/references/profiles.md text eol=lf
+
 # Keep native Windows entry points conventional on checkout.
 *.ps1 text eol=crlf

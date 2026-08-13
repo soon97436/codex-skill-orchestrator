@@ -63,6 +63,7 @@ class EngineTests(unittest.TestCase):
             )
             self.assertTrue(installed["changed"])
             self.assertTrue((install_root / "app" / "bin" / "cso.py").is_file())
+            self.assertTrue((install_root / "app" / "bin" / "python-discovery.ps1").is_file())
             active_path = skills_dir / "codex-skill-orchestrator" / "references" / "active-profile.json"
             active = json.loads(active_path.read_text(encoding="utf-8"))
             self.assertEqual(active["profile"]["id"], "universal")

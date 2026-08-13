@@ -30,7 +30,7 @@
         },
         {
           "path": "agents/openai.yaml",
-          "sha256": "4491487d18d6f13cc6d97bd4023a0d394b176b8b19a6581ca5ebb6f7f6261841"
+          "sha256": "5b5c7b9764bcc1e52ed7f4c718be21d28c184a82987823a6679142b61faf0d2e"
         },
         {
           "path": "references/profiles.md",

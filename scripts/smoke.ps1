@@ -15,10 +15,12 @@ $stateRoot = Join-Path $smokeRoot 'state'
 $skillsRoot = Join-Path $smokeRoot 'skills'
 $previousBytecodeSetting = $env:PYTHONDONTWRITEBYTECODE
 $env:PYTHONDONTWRITEBYTECODE = '1'
+. (Join-Path $projectRoot 'installer\python-discovery.ps1')
+$python = Find-CsoPython
 
 Push-Location -LiteralPath $projectRoot
 try {
-    python -m unittest discover -s tests -v
+    & $python.Executable @($python.Prefix) -m unittest discover -s tests -v
     if ($LASTEXITCODE -ne 0) { throw 'Unit tests failed.' }
 
     & '.\installer\install.ps1' -Action Install -Profile Universal -InstallRoot $stateRoot -SkillsDir $skillsRoot -DryRun -Json

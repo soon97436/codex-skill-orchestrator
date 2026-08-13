@@ -58,6 +58,12 @@ The default managed state directory is `%LOCALAPPDATA%\codex-skill-orchestrator`
 
 The installer does not modify `PATH`, shell profiles, PowerShell execution policy, global `AGENTS.md`, or existing unrelated skills.
 
+## Cross-device workflow
+
+Use [HANDOFF.md](HANDOFF.md) for current project state and [docs/CROSS_DEVICE_WORKFLOW.md](docs/CROSS_DEVICE_WORKFLOW.md) for the Windows/macOS fetch-first workflow and shared-versus-local data boundary. GitHub carries reviewed source, profiles, registry, checksums, public configuration, and documentation; installed Skills, credentials, runtime, cache, private configuration, chat history, and private backups remain machine-local.
+
+The implementation security model is documented in [SECURITY.md](SECURITY.md) and [security/policy.md](security/policy.md).
+
 ## Switch profiles
 
 From the source checkout:

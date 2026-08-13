@@ -1,4 +1,5 @@
 import os
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -12,6 +13,20 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class SecurityTests(unittest.TestCase):
+    @unittest.skipUnless(sys.platform == "darwin", "macOS system alias test")
+    def test_macos_system_temp_alias_is_accepted(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="cso mac temp ") as temporary:
+            base = Path(temporary)
+            result = apply_profile(
+                "universal",
+                base / "state",
+                base / "skills",
+                source_root=ROOT,
+                dry_run=True,
+            )
+            self.assertTrue(result["dry_run"])
+            self.assertFalse(result["changed"])
+
     def test_path_traversal_and_drive_paths_are_rejected(self) -> None:
         for unsafe in ("../escape", "/absolute", "folder/../escape", "drive:C"):
             with self.subTest(unsafe=unsafe):

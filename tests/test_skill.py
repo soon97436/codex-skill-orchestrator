@@ -8,6 +8,17 @@ SKILL = ROOT / "router" / "codex-skill-orchestrator"
 
 
 class SkillMetadataTests(unittest.TestCase):
+    def test_windows_entrypoints_share_python_discovery(self) -> None:
+        helper = (ROOT / "installer" / "python-discovery.ps1").read_text(encoding="utf-8")
+        self.assertLess(helper.index("Name = 'py'"), helper.index("Name = 'python3'"))
+        self.assertLess(helper.index("Name = 'python3'"), helper.index("Name = 'python'"))
+        for relative in ("installer/install.ps1", "installer/cso.ps1", "scripts/smoke.ps1"):
+            with self.subTest(path=relative):
+                content = (ROOT / relative).read_text(encoding="utf-8")
+                self.assertIn("python-discovery.ps1", content)
+                self.assertIn("Find-CsoPython", content)
+                self.assertNotIn("$candidates =", content)
+
     def test_skill_frontmatter_is_minimal_and_valid(self) -> None:
         content = (SKILL / "SKILL.md").read_text(encoding="utf-8")
         match = re.match(r"^---\n(.*?)\n---\n", content, re.DOTALL)

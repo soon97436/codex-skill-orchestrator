@@ -17,6 +17,16 @@ downloads/
 staging/
 *.lock
 
+# Repository-local agent state and private configuration
+/.codex/
+/.claude/
+/.cache/
+/runtime/
+/.local-state/
+/private-config/
+*.local
+*.local.*
+
 # Python
 __pycache__/
 *.py[cod]

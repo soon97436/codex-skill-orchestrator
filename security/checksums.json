@@ -4,7 +4,7 @@
   "bundles": {
     "codex-skill-orchestrator@0.1.0": {
       "SKILL.md": "8516889f84ddce7263bb2e4af4b8a184790821b76c03c57e8ed3bafc7b11cdbb",
-      "agents/openai.yaml": "4491487d18d6f13cc6d97bd4023a0d394b176b8b19a6581ca5ebb6f7f6261841",
+      "agents/openai.yaml": "5b5c7b9764bcc1e52ed7f4c718be21d28c184a82987823a6679142b61faf0d2e",
       "references/profiles.md": "d261d1b8fd5be19e8015923c56cc8633a8c99baecc49de1ed122a2a81bda060c"
     }
   }
