@@ -13,14 +13,15 @@
 
 ## Current Status
 
-- Phase: Phase 3C — scoped skill recommendations
-- Status: Checkpoint C passed macOS validation and is ready for a checkpoint commit
-- Blocker: The new Checkpoint C commit will require Windows validation after the macOS checkpoint is pushed.
+- Phase: Phase 3G — final cross-platform release gate remediation
+- Status: Phase 3A–3F implementation and integration are complete, and the Phase 3F checkpoint passed macOS and Windows validation. Phase 3G found this stale handoff as a documentation defect; the current change is the minimal remediation candidate.
+- Blocker: The documentation-only remediation checkpoint must pass the final Phase 3G gate on macOS and Windows. Phase 3H merge is not authorized.
 
 ## Repository
 
 - Remote: `https://github.com/soon97436/codex-skill-orchestrator.git`
 - Source of truth: GitHub repository
+- Main: `8442408744915dc16806be4bf1c9d5c22eecf7ff`
 
 ## Current Branch
 
@@ -28,7 +29,10 @@
 
 ## Last Known Good Commit
 
-- `318727ec174dd8e641f25baa943657c02e4a079f` is the current Mac/Windows verified Phase 3B checkpoint.
+- Commit: `cbdc20ccbbb040b093633db0330b015936c6ab64`
+- Tree: `a5206a2c6581f14da314d75350ae5c57bd1bf8b7`
+- Scope: Phase 3F cross-platform checkpoint; 63 tracked files and 146 tests passed on macOS and Windows.
+- The documentation-remediation commit that follows this LKG still requires Phase 3G validation on both platforms.
 
 ## Completed Work
 
@@ -38,11 +42,15 @@
 - Phase 3A provides bounded, metadata-only context discovery with fail-closed link and reparse handling.
 - Phase 3B models root, path-scoped, and unknown scope states and reports deterministic structural overlap and conflict evidence.
 - Phase 3C adds registry-bounded scoped recommendations with structured reasons and explicit completeness.
+- Phase 3D adds deterministic recommendation explanations with registry-bounded evidence references and explicit limitations.
+- Phase 3E adds declarative capability analysis without runtime enforcement.
+- Phase 3F closes the integrated Phase 3 contract across recommendation, explanation, capability, privacy, trust, and determinism invariants.
 
 ## Pending Work
 
-- Validate the Phase 3C checkpoint on Windows without changing the source checkout.
-- Promote the new commit to Last Known Good only after both platforms pass the same Git commit.
+- Validate this documentation-only remediation and create one documentation checkpoint.
+- Rerun the complete Phase 3G final release gate on macOS and Windows from that same commit.
+- Proceed to Phase 3H only after both platforms pass; main remains unchanged until then.
 
 ## Architecture Decisions
 
@@ -55,6 +63,9 @@
 - Phase 3B conflicts are limited to normalized-path collisions and duplicate source registrations.
 - Recommendation candidates are deterministic ID mappings filtered through the validated registry; registry expansion remains a separate security decision.
 - Unknown or conflicted context does not contribute trusted scoped recommendation evidence.
+- Recommendation explanations and capability findings remain deterministic, metadata-only, and registry-bounded.
+- Capability declarations are audit metadata only; enforcement status remains `not-implemented`.
+- Recommendation completeness, explanation completeness, and capability-analysis completeness remain distinct.
 
 ## Required Tools
 
@@ -102,12 +113,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/smoke.ps1
 
 ## Tests
 
-- macOS: Phase 3C passed 98 unit tests, POSIX smoke, release audit, Python 3.9 grammar, diff checks, and integrity checks.
-- Windows: Phase 3B commit `318727ec174dd8e641f25baa943657c02e4a079f` passed; Phase 3C is pending.
+- macOS: Phase 3F commit `cbdc20ccbbb040b093633db0330b015936c6ab64` passed 146 unit tests, POSIX smoke, release audit, Python 3.9 grammar, diff checks, canonical JSON, privacy, and integrity gates.
+- Windows: The same Phase 3F commit and tree passed the Windows unit, smoke, release-audit, portability, canonical JSON, privacy, and integrity gates.
 
 ## Known Issues
 
-- Phase 3C cross-device readiness remains pending until Windows validates the new checkpoint revision.
+- Phase 3G remains blocked only by validation of the documentation-remediation checkpoint. The Phase 3F implementation checkpoint is cross-platform verified.
 
 ## Security Notes
 
@@ -117,15 +128,20 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/smoke.ps1
 
 ## Next Recommended Action
 
-1. Push the exact Phase 3C checkpoint, then validate it on Windows.
+1. Validate the documentation-only remediation.
+2. Create one documentation checkpoint.
+3. Push it non-force to `phase3/context-skill-intelligence`.
+4. Rerun the Phase 3G final release gate on macOS and Windows.
+5. Proceed to Phase 3H only if both platforms pass.
 
 ## Last Handoff
 
 - Date: 2026-08-13
 - From platform: macOS
-- To platform: Windows
+- To platform: macOS and Windows Phase 3G validation
 - Prepared by: Codex
-- Local SHA: `318727ec174dd8e641f25baa943657c02e4a079f`
-- Remote SHA: `318727ec174dd8e641f25baa943657c02e4a079f`
-- Sync: `0 behind / 0 ahead`
-- Worktree: `CLEAN at the last cross-platform checkpoint`
+- Verified Phase 3F commit: `cbdc20ccbbb040b093633db0330b015936c6ab64`
+- Verified Phase 3F tree: `a5206a2c6581f14da314d75350ae5c57bd1bf8b7`
+- Documentation remediation: `Pending checkpoint creation and Phase 3G validation`
+- Sync: `0 behind / 0 ahead at the Phase 3F LKG`
+- Worktree: `Documentation-only remediation candidate`
