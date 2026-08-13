@@ -16,6 +16,17 @@ class RecommendationTests(unittest.TestCase):
                 {"technology": "github-actions", "evidence": [".github/workflows/ci.yml"]},
             ],
             "tests": [{"framework": "pytest", "evidence": ["tests/test_app.py"]}],
+            "context": {
+                "evidence": [
+                    {
+                        "path": "AGENTS.md",
+                        "kind": "agent-instructions",
+                        "scope": ".",
+                        "size_bytes": 100,
+                    }
+                ],
+                "truncated": False,
+            },
             "project": {"files_analyzed": 20, "size": "small", "truncated": False},
         }
         registry = validate_registry(ROOT)

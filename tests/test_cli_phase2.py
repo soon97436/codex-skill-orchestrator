@@ -62,6 +62,20 @@ class PhaseTwoCliTests(unittest.TestCase):
         self.assertEqual(document["detected"][0]["technology"], "python")
         self.assertNotIn(str(project), first.stdout)
 
+    def test_analyze_human_output_explains_context_evidence(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="cso-cli-") as temporary:
+            project = Path(temporary)
+            (project / "AGENTS.md").write_text("instructions\n", encoding="utf-8")
+
+            result = run_cso(project, "analyze")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Context evidence:", result.stdout)
+        self.assertIn("AGENTS.md", result.stdout)
+        self.assertIn("agent-instructions", result.stdout)
+        self.assertIn("scope: .", result.stdout)
+        self.assertNotIn(str(project), result.stdout)
+
     def test_init_yes_creates_only_expected_configuration(self) -> None:
         with tempfile.TemporaryDirectory(prefix="cso-cli-") as temporary:
             project = Path(temporary)

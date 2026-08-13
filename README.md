@@ -1,6 +1,6 @@
 # Codex Skill Orchestrator
 
-Codex Skill Orchestrator (CSO) is a deterministic, local-first, cross-platform profile manager with explainable, registry-bounded recommendations. Analyze a repository before changing it:
+Codex Skill Orchestrator (CSO) is a deterministic, local-first, cross-platform profile manager with explainable, registry-bounded recommendations and bounded agent-context discovery. Analyze a repository before changing it:
 
 ```sh
 cso analyze
@@ -153,11 +153,12 @@ python -m skill_orchestrator audit --json
 
 On Windows, run `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/smoke.ps1`. On macOS/Linux, run `sh scripts/smoke.sh`.
 
-## Phase 2 P0 boundaries
+## Deterministic checkpoint boundaries
 
 - No remote registry fetcher or archive extractor is included.
 - No third-party skill code is bundled.
 - Analysis uses bounded local metadata heuristics; it does not execute project commands or call an LLM.
+- Context discovery reports only repository-relative path, kind, conservative scope, and byte-size evidence for known instruction files; it does not read their content.
 - Recommendations include only skills present in the validated registry.
 - Users may choose whether to version-control `.cso/config.json`; CSO does not add it to `.gitignore`.
 - Custom is a checked-in example slot in Phase 1; users edit a reviewed checkout rather than using a profile-editor command.

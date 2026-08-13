@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, MutableMapping, Set, Tuple
 
+from .context import discover_context
 from .errors import SecurityError, ValidationError
 from .validation import is_reparse_point
 
@@ -29,6 +30,7 @@ EXCLUDED_DIRECTORIES = {
     "build",
     "target",
     "vendor",
+    "cache",
     ".cache",
     "__pycache__",
     ".pytest_cache",
@@ -144,6 +146,10 @@ def analyze_project(root: Path, *, max_entries: int = MAX_ENTRIES) -> Dict[str, 
 
     warnings: List[str] = []
     files, directories, truncated = _walk_files(root, max_entries, warnings)
+    context = discover_context(files, warnings)
+    if truncated:
+        context["truncated"] = True
+        warnings.append("Context discovery incomplete because project traversal was truncated")
     detected: Dict[str, Set[str]] = {}
     tests: Dict[str, Set[str]] = {}
 
@@ -201,6 +207,7 @@ def analyze_project(root: Path, *, max_entries: int = MAX_ENTRIES) -> Dict[str, 
         "truncated": truncated,
         "detected": _stable_findings(detected, "technology"),
         "tests": _stable_findings(tests, "framework"),
+        "context": context,
         "project": {
             "files_analyzed": len(files),
             "size": "unknown" if truncated else _classify_size(len(files)),

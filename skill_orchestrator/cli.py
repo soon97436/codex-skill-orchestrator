@@ -148,6 +148,18 @@ def _human_analysis(document: Mapping[str, Any]) -> str:
     )
     if project["truncated"]:
         lines.append("  Warning: analysis was truncated at the configured traversal limit.")
+    lines.extend(["", "Context evidence:"])
+    context = document["context"]
+    if context["evidence"]:
+        for evidence in context["evidence"]:
+            lines.append(
+                f"  {evidence['path']} ({evidence['kind']}; scope: {evidence['scope']}; "
+                f"{evidence['size_bytes']} bytes)"
+            )
+    else:
+        lines.append("  No known agent context files discovered.")
+    if context["truncated"]:
+        lines.append("  Warning: context discovery was truncated.")
     lines.extend(["", "Recommended profile:", f"  {document['recommended_profile']}"])
     lines.extend(["", "Recommended skills:"])
     if document["recommended_skills"]:
