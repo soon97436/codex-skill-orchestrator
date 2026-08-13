@@ -153,12 +153,25 @@ def _human_analysis(document: Mapping[str, Any]) -> str:
     if context["evidence"]:
         for evidence in context["evidence"]:
             lines.append(
-                f"  {evidence['path']} ({evidence['kind']}; scope: {evidence['scope']})"
+                f"  {evidence['path']} ({evidence['kind']}; scope: {evidence['scope']}; "
+                f"scope state: {evidence['scope_state']})"
             )
     else:
         lines.append("  No known agent context files discovered.")
     if context["truncated"]:
         lines.append("  Warning: context discovery was truncated.")
+    lines.extend(["", "Context conflicts:"])
+    if context["conflicts"]:
+        for conflict in context["conflicts"]:
+            lines.append(
+                f"  {conflict['severity'].upper()} {conflict['id']}: "
+                f"{', '.join(conflict['paths'])} (scope: {conflict['scope']}; "
+                f"reason: {conflict['reason']})"
+            )
+    elif context["conflict_analysis_complete"]:
+        lines.append("  No deterministic context conflicts detected.")
+    else:
+        lines.append("  Conflict analysis incomplete.")
     lines.extend(["", "Recommended profile:", f"  {document['recommended_profile']}"])
     lines.extend(["", "Recommended skills:"])
     if document["recommended_skills"]:

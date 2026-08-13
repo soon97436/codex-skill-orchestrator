@@ -7,7 +7,7 @@ import stat
 import unicodedata
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from .validation import is_reparse_point
 
@@ -17,18 +17,115 @@ MAX_CONTEXT_FILE_BYTES = 256_000
 MAX_CONTEXT_SCAN_ENTRIES = 50_000
 
 
-def _context_kind_and_scope(relative: str) -> Optional[Tuple[str, str]]:
+def _normalized_scope_parts(scope: str) -> Tuple[str, ...]:
+    if scope == ".":
+        return ()
+    return tuple(unicodedata.normalize("NFC", part).casefold() for part in scope.split("/"))
+
+
+def _scope_overlaps(evidence: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    known = [item for item in evidence if item["scope_state"] != "unknown"]
+    known.sort(
+        key=lambda item: (
+            len(_normalized_scope_parts(item["scope"])),
+            _normalized_scope_parts(item["scope"]),
+            unicodedata.normalize("NFC", item["path"]).casefold(),
+            item["path"],
+        )
+    )
+    overlaps: List[Dict[str, Any]] = []
+    for index, ancestor in enumerate(known):
+        ancestor_parts = _normalized_scope_parts(ancestor["scope"])
+        for descendant in known[index + 1 :]:
+            descendant_parts = _normalized_scope_parts(descendant["scope"])
+            if descendant_parts[: len(ancestor_parts)] != ancestor_parts:
+                continue
+            relationship = "same-scope" if descendant_parts == ancestor_parts else "ancestor-descendant"
+            overlaps.append(
+                {
+                    "type": "scope-overlap",
+                    "paths": [ancestor["path"], descendant["path"]],
+                    "scopes": [ancestor["scope"], descendant["scope"]],
+                    "relationship": relationship,
+                }
+            )
+    return overlaps
+
+
+def _conflict_sort_key(conflict: Dict[str, Any]) -> Tuple[Any, ...]:
+    severity_order = {"error": 0, "warning": 1, "info": 2}
+    return (
+        severity_order.get(conflict["severity"], 99),
+        conflict["type"],
+        _normalized_scope_parts(conflict["scope"]) if conflict["scope"] != "unknown" else ("~unknown",),
+        tuple(unicodedata.normalize("NFC", path).casefold() for path in conflict["paths"]),
+        tuple(conflict["paths"]),
+    )
+
+
+def _collision_conflicts(
+    logical_contexts: Mapping[str, Sequence[Tuple[str, Tuple[str, str, str]]]],
+) -> List[Dict[str, Any]]:
+    conflicts: List[Dict[str, Any]] = []
+    for logical_key in sorted(logical_contexts):
+        registrations = logical_contexts[logical_key]
+        if len(registrations) < 2:
+            continue
+        paths = sorted(
+            {relative for relative, _classification in registrations},
+            key=lambda relative: (unicodedata.normalize("NFC", relative).casefold(), relative),
+        )
+        classification = min(
+            registrations,
+            key=lambda item: (unicodedata.normalize("NFC", item[0]).casefold(), item[0]),
+        )[1]
+        conflict_type = "normalized-path-collision" if len(paths) > 1 else "duplicate-source-registration"
+        reason = (
+            "multiple context paths share one NFC-casefold identity"
+            if len(paths) > 1
+            else "one context source is registered more than once"
+        )
+        conflicts.append(
+            {
+                "id": f"context.{conflict_type}",
+                "type": conflict_type,
+                "severity": "warning",
+                "paths": paths,
+                "scope": classification[1],
+                "reason": reason,
+            }
+        )
+    return sorted(conflicts, key=_conflict_sort_key)
+
+
+def _context_document(
+    evidence: Sequence[Dict[str, Any]],
+    conflicts: Sequence[Dict[str, Any]],
+    incomplete: bool,
+) -> Dict[str, Any]:
+    return {
+        "evidence": list(evidence),
+        "scope_overlaps": _scope_overlaps(evidence),
+        "conflicts": list(conflicts),
+        "conflict_analysis_complete": not incomplete,
+        "truncated": incomplete,
+    }
+
+
+def _context_kind_and_scope(relative: str) -> Optional[Tuple[str, str, str]]:
     path = Path(relative)
     parts = tuple(part.casefold() for part in path.parts)
     if path.name.casefold() in {"agents.md", "claude.md"}:
         parent = path.parent.as_posix()
-        return "agent-instructions", "." if parent == "." else parent
+        if parent == ".":
+            return "agent-instructions", ".", "root"
+        return "agent-instructions", parent, "path-scoped"
     if parts == (".cursorrules",):
-        return "cursor-rules", "."
+        return "cursor-rules", ".", "root"
     if len(parts) == 3 and parts[:2] == (".cursor", "rules") and parts[2].endswith(".md"):
-        return "cursor-rule", "unknown"
+        return "cursor-rule", "unknown", "unknown"
     if parts == (".github", "copilot-instructions.md"):
-        return "copilot-instructions", "."
+        return "copilot-instructions", ".", "root"
     return None
 
 
@@ -50,26 +147,45 @@ def discover_context(
         warnings.append(f"context-unsafe-path: {unsafe_path}")
     if traversal_truncated:
         warnings.append("Context discovery incomplete because project traversal was truncated")
-        return {"evidence": [], "truncated": True}
-    candidates: List[Tuple[Path, str, Tuple[str, str]]] = []
-    logical_paths: Dict[str, List[str]] = defaultdict(list)
+        return _context_document([], [], True)
+    candidates: List[Tuple[Path, str, Tuple[str, str, str]]] = []
+    logical_contexts: Dict[str, List[Tuple[str, Tuple[str, str, str]]]] = defaultdict(list)
     for path, relative in files:
         classification = _context_kind_and_scope(relative)
         if classification is None:
             continue
         candidates.append((path, relative, classification))
         logical_key = unicodedata.normalize("NFC", relative).casefold()
-        logical_paths[logical_key].append(relative)
-    ambiguous = {key for key, paths in logical_paths.items() if len(paths) > 1}
-    for key in sorted(ambiguous):
-        warnings.append("context-ambiguous-path: " + " | ".join(sorted(logical_paths[key])))
-    if ambiguous:
+        logical_contexts[logical_key].append((relative, classification))
+    collisions = {
+        key
+        for key, registrations in logical_contexts.items()
+        if len({relative for relative, _classification in registrations}) > 1
+    }
+    duplicates = {
+        key
+        for key, registrations in logical_contexts.items()
+        if len(registrations) > 1
+        and len({relative for relative, _classification in registrations}) == 1
+    }
+    for key in sorted(collisions):
+        paths = sorted({relative for relative, _classification in logical_contexts[key]})
+        warnings.append("context-ambiguous-path: " + " | ".join(paths))
+    for key in sorted(duplicates):
+        warnings.append(f"context-duplicate-registration: {logical_contexts[key][0][0]}")
+    if collisions:
         incomplete = True
+    conflicts = _collision_conflicts(logical_contexts)
 
+    processed_registrations = set()
     for path, relative, classification in sorted(candidates, key=lambda item: (item[1].casefold(), item[1])):
         logical_key = unicodedata.normalize("NFC", relative).casefold()
-        if logical_key in ambiguous:
+        if logical_key in collisions:
             continue
+        registration_key = (logical_key, relative)
+        if registration_key in processed_registrations:
+            continue
+        processed_registrations.add(registration_key)
         if len(evidence) >= max_files:
             incomplete = True
             count_truncated = True
@@ -133,14 +249,15 @@ def discover_context(
             warnings.append(f"context-invalid-utf8: {relative}")
             incomplete = True
             continue
-        kind, scope = classification
+        kind, scope, scope_state = classification
         evidence.append(
             {
                 "path": relative,
                 "kind": kind,
                 "scope": scope,
+                "scope_state": scope_state,
             }
         )
     if count_truncated:
         warnings.append(f"Context evidence truncated at {max_files} files")
-    return {"evidence": evidence, "truncated": incomplete}
+    return _context_document(evidence, conflicts, incomplete)

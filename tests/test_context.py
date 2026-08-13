@@ -9,6 +9,16 @@ from skill_orchestrator.analyzer import analyze_project
 from skill_orchestrator.context import MAX_CONTEXT_FILE_BYTES, MAX_CONTEXT_FILES, discover_context
 
 
+def expected_context(*, evidence=(), overlaps=(), conflicts=(), incomplete=False):
+    return {
+        "evidence": list(evidence),
+        "scope_overlaps": list(overlaps),
+        "conflicts": list(conflicts),
+        "conflict_analysis_complete": not incomplete,
+        "truncated": incomplete,
+    }
+
+
 class ContextDiscoveryTests(unittest.TestCase):
     def test_scan_entry_limit_bounds_actual_directory_enumeration(self) -> None:
         with tempfile.TemporaryDirectory(prefix="cso-context-") as temporary:
@@ -80,7 +90,7 @@ class ContextDiscoveryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="cso-context-") as temporary:
             result = analyze_project(Path(temporary))
 
-        self.assertEqual(result["context"], {"evidence": [], "truncated": False})
+        self.assertEqual(result["context"], expected_context())
 
     def test_root_agents_file_has_repository_scoped_evidence(self) -> None:
         with tempfile.TemporaryDirectory(prefix="cso-context-") as temporary:
@@ -92,16 +102,16 @@ class ContextDiscoveryTests(unittest.TestCase):
 
         self.assertEqual(
             result["context"],
-            {
-                "evidence": [
+            expected_context(
+                evidence=[
                     {
                         "path": "AGENTS.md",
                         "kind": "agent-instructions",
                         "scope": ".",
+                        "scope_state": "root",
                     }
-                ],
-                "truncated": False,
-            },
+                ]
+            ),
         )
 
     def test_lf_and_crlf_contexts_have_equivalent_semantic_evidence(self) -> None:
@@ -130,7 +140,44 @@ class ContextDiscoveryTests(unittest.TestCase):
                     "path": "services/api/CLAUDE.md",
                     "kind": "agent-instructions",
                     "scope": "services/api",
+                    "scope_state": "path-scoped",
                 }
+            ],
+        )
+
+    def test_scope_overlap_detection_is_deterministic(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="cso-context-") as temporary:
+            root = Path(temporary)
+            (root / "AGENTS.md").write_text("root\n", encoding="utf-8")
+            services = root / "services"
+            api = services / "api"
+            api.mkdir(parents=True)
+            (services / "CLAUDE.md").write_text("services\n", encoding="utf-8")
+            (api / "AGENTS.md").write_text("api\n", encoding="utf-8")
+
+            result = analyze_project(root)
+
+        self.assertEqual(
+            result["context"]["scope_overlaps"],
+            [
+                {
+                    "type": "scope-overlap",
+                    "paths": ["AGENTS.md", "services/CLAUDE.md"],
+                    "scopes": [".", "services"],
+                    "relationship": "ancestor-descendant",
+                },
+                {
+                    "type": "scope-overlap",
+                    "paths": ["AGENTS.md", "services/api/AGENTS.md"],
+                    "scopes": [".", "services/api"],
+                    "relationship": "ancestor-descendant",
+                },
+                {
+                    "type": "scope-overlap",
+                    "paths": ["services/CLAUDE.md", "services/api/AGENTS.md"],
+                    "scopes": ["services", "services/api"],
+                    "relationship": "ancestor-descendant",
+                },
             ],
         )
 
@@ -155,11 +202,25 @@ class ContextDiscoveryTests(unittest.TestCase):
 
         self.assertEqual(first["context"], second["context"])
         self.assertEqual(
-            [(item["path"], item["kind"], item["scope"]) for item in first["context"]["evidence"]],
             [
-                (".cursor/rules/a-frontend.md", "cursor-rule", "unknown"),
-                (".cursorrules", "cursor-rules", "."),
-                (".github/copilot-instructions.md", "copilot-instructions", "."),
+                (item["path"], item["kind"], item["scope"], item["scope_state"])
+                for item in first["context"]["evidence"]
+            ],
+            [
+                (".cursor/rules/a-frontend.md", "cursor-rule", "unknown", "unknown"),
+                (".cursorrules", "cursor-rules", ".", "root"),
+                (".github/copilot-instructions.md", "copilot-instructions", ".", "root"),
+            ],
+        )
+        self.assertEqual(
+            first["context"]["scope_overlaps"],
+            [
+                {
+                    "type": "scope-overlap",
+                    "paths": [".cursorrules", ".github/copilot-instructions.md"],
+                    "scopes": [".", "."],
+                    "relationship": "same-scope",
+                }
             ],
         )
 
@@ -170,7 +231,7 @@ class ContextDiscoveryTests(unittest.TestCase):
 
             result = analyze_project(root)
 
-        self.assertEqual(result["context"], {"evidence": [], "truncated": True})
+        self.assertEqual(result["context"], expected_context(incomplete=True))
         self.assertIn("context-oversized: AGENTS.md", result["warnings"])
 
     def test_malformed_utf8_is_skipped_without_content_leakage(self) -> None:
@@ -180,7 +241,7 @@ class ContextDiscoveryTests(unittest.TestCase):
 
             result = analyze_project(root)
 
-        self.assertEqual(result["context"], {"evidence": [], "truncated": True})
+        self.assertEqual(result["context"], expected_context(incomplete=True))
         self.assertIn("context-invalid-utf8: AGENTS.md", result["warnings"])
         self.assertNotIn("secret-prefix", str(result))
         self.assertNotIn("secret-suffix", str(result))
@@ -197,12 +258,16 @@ class ContextDiscoveryTests(unittest.TestCase):
 
                 self.assertEqual(
                     result["context"],
-                    {
-                        "evidence": [
-                            {"path": "AGENTS.md", "kind": "agent-instructions", "scope": "."}
-                        ],
-                        "truncated": False,
-                    },
+                    expected_context(
+                        evidence=[
+                            {
+                                "path": "AGENTS.md",
+                                "kind": "agent-instructions",
+                                "scope": ".",
+                                "scope_state": "root",
+                            }
+                        ]
+                    ),
                 )
                 self.assertNotIn("do-not-emit-this-value", str(result))
 
@@ -217,7 +282,7 @@ class ContextDiscoveryTests(unittest.TestCase):
         serialized = json.dumps(result, sort_keys=True)
         self.assertEqual(
             set(result["context"]["evidence"][0]),
-            {"path", "kind", "scope"},
+            {"path", "kind", "scope", "scope_state"},
         )
         for forbidden in (secret, str(root), "size_bytes", "timestamp", "hostname", "username"):
             self.assertNotIn(forbidden, serialized)
@@ -253,7 +318,7 @@ class ContextDiscoveryTests(unittest.TestCase):
 
             result = analyze_project(root)
 
-        self.assertEqual(result["context"], {"evidence": [], "truncated": True})
+        self.assertEqual(result["context"], expected_context(incomplete=True))
         self.assertIn("Skipped link or reparse point: AGENTS.md", result["warnings"])
         self.assertIn("context-unsafe-path: AGENTS.md", result["warnings"])
         self.assertNotIn(str(base), str(result))
@@ -273,7 +338,7 @@ class ContextDiscoveryTests(unittest.TestCase):
 
             result = analyze_project(root)
 
-        self.assertEqual(result["context"], {"evidence": [], "truncated": True})
+        self.assertEqual(result["context"], expected_context(incomplete=True))
         self.assertIn("context-unsafe-path: linked", result["warnings"])
         self.assertNotIn("linked/AGENTS.md", str(result))
 
@@ -287,7 +352,7 @@ class ContextDiscoveryTests(unittest.TestCase):
                     result = analyze_project(root)
 
         mocked_open.assert_not_called()
-        self.assertEqual(result["context"], {"evidence": [], "truncated": True})
+        self.assertEqual(result["context"], expected_context(incomplete=True))
         self.assertIn("context-unsafe-file: AGENTS.md", result["warnings"])
 
     def test_bounded_project_traversal_marks_context_incomplete(self) -> None:
@@ -301,6 +366,8 @@ class ContextDiscoveryTests(unittest.TestCase):
         self.assertTrue(result["truncated"])
         self.assertEqual(result["context"]["evidence"], [])
         self.assertTrue(result["context"]["truncated"])
+        self.assertFalse(result["context"]["conflict_analysis_complete"])
+        self.assertEqual(result["context"]["conflicts"], [])
         self.assertIn(
             "Context discovery incomplete because project traversal was truncated",
             result["warnings"],
@@ -332,17 +399,43 @@ class ContextDiscoveryTests(unittest.TestCase):
                 path.write_text("valid\n", encoding="utf-8")
             warnings = []
 
-            result = discover_context(
-                [
-                    (first, "AGENTS.md"),
-                    (second, "agents.MD"),
-                    (third, "caf\u00e9/CLAUDE.md"),
-                    (fourth, "cafe\u0301/CLAUDE.md"),
-                ],
-                warnings,
-            )
+            registrations = [
+                (first, "AGENTS.md"),
+                (second, "agents.MD"),
+                (third, "caf\u00e9/CLAUDE.md"),
+                (fourth, "cafe\u0301/CLAUDE.md"),
+            ]
+            result = discover_context(registrations, warnings)
+            reversed_warnings = []
+            reversed_result = discover_context(list(reversed(registrations)), reversed_warnings)
 
-        self.assertEqual(result, {"evidence": [], "truncated": True})
+        self.assertEqual(
+            result,
+            {
+                "evidence": [],
+                "scope_overlaps": [],
+                "conflicts": [
+                    {
+                        "id": "context.normalized-path-collision",
+                        "type": "normalized-path-collision",
+                        "severity": "warning",
+                        "paths": ["AGENTS.md", "agents.MD"],
+                        "scope": ".",
+                        "reason": "multiple context paths share one NFC-casefold identity",
+                    },
+                    {
+                        "id": "context.normalized-path-collision",
+                        "type": "normalized-path-collision",
+                        "severity": "warning",
+                        "paths": ["cafe\u0301/CLAUDE.md", "caf\u00e9/CLAUDE.md"],
+                        "scope": "cafe\u0301",
+                        "reason": "multiple context paths share one NFC-casefold identity",
+                    },
+                ],
+                "conflict_analysis_complete": False,
+                "truncated": True,
+            },
+        )
         self.assertEqual(
             warnings,
             [
@@ -350,6 +443,55 @@ class ContextDiscoveryTests(unittest.TestCase):
                 "context-ambiguous-path: cafe\u0301/CLAUDE.md | caf\u00e9/CLAUDE.md",
             ],
         )
+        self.assertEqual(result, reversed_result)
+        self.assertEqual(warnings, reversed_warnings)
+        serialized = json.dumps(result, ensure_ascii=False, sort_keys=True)
+        self.assertNotIn(str(root), serialized)
+        self.assertNotIn("skill_id", serialized)
+        self.assertTrue(
+            all(
+                not Path(path).is_absolute() and "\\" not in path
+                for conflict in result["conflicts"]
+                for path in conflict["paths"]
+            )
+        )
+
+    def test_duplicate_context_registration_is_deduplicated(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="cso-context-") as temporary:
+            path = Path(temporary) / "source"
+            path.write_text("must-not-appear\n", encoding="utf-8")
+            warnings = []
+
+            result = discover_context(
+                [(path, "AGENTS.md"), (path, "AGENTS.md")],
+                warnings,
+            )
+
+        self.assertEqual(
+            result,
+            expected_context(
+                evidence=[
+                    {
+                        "path": "AGENTS.md",
+                        "kind": "agent-instructions",
+                        "scope": ".",
+                        "scope_state": "root",
+                    }
+                ],
+                conflicts=[
+                    {
+                        "id": "context.duplicate-source-registration",
+                        "type": "duplicate-source-registration",
+                        "severity": "warning",
+                        "paths": ["AGENTS.md"],
+                        "scope": ".",
+                        "reason": "one context source is registered more than once",
+                    }
+                ],
+            ),
+        )
+        self.assertEqual(warnings, ["context-duplicate-registration: AGENTS.md"])
+        self.assertNotIn("must-not-appear", json.dumps(result, sort_keys=True))
 
     def test_context_is_not_discovered_in_excluded_runtime_directories(self) -> None:
         with tempfile.TemporaryDirectory(prefix="cso-context-") as temporary:
@@ -361,7 +503,7 @@ class ContextDiscoveryTests(unittest.TestCase):
 
             result = analyze_project(root)
 
-        self.assertEqual(result["context"], {"evidence": [], "truncated": False})
+        self.assertEqual(result["context"], expected_context())
 
 
 if __name__ == "__main__":

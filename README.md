@@ -1,6 +1,6 @@
 # Codex Skill Orchestrator
 
-Codex Skill Orchestrator (CSO) is a deterministic, local-first, cross-platform profile manager with explainable, registry-bounded recommendations and bounded agent-context discovery. Analyze a repository before changing it:
+Codex Skill Orchestrator (CSO) is a deterministic, local-first, cross-platform profile manager with explainable, registry-bounded recommendations, bounded agent-context discovery, and structural context-conflict evidence. Analyze a repository before changing it:
 
 ```sh
 cso analyze
@@ -77,6 +77,10 @@ The installer does not modify `PATH`, shell profiles, PowerShell execution polic
 Use [HANDOFF.md](HANDOFF.md) for current project state and [docs/CROSS_DEVICE_WORKFLOW.md](docs/CROSS_DEVICE_WORKFLOW.md) for the Windows/macOS fetch-first workflow and shared-versus-local data boundary. GitHub carries reviewed source, profiles, registry, checksums, public configuration, and documentation; installed Skills, credentials, runtime, cache, private configuration, chat history, and private backups remain machine-local.
 
 The implementation security model is documented in [SECURITY.md](SECURITY.md) and [security/policy.md](security/policy.md).
+
+## Context scope and conflicts
+
+Context evidence uses explicit `root`, `path-scoped`, or `unknown` scope states. CSO reports deterministic same-scope and ancestor/descendant overlap metadata without treating overlap alone as a contradiction. Checkpoint B reports only normalized-path collisions and duplicate source registrations as conflicts; it does not read, quote, or semantically compare instruction text. If discovery is incomplete, `conflict_analysis_complete` is `false` and CSO does not claim that no conflicts exist.
 
 ## Switch profiles
 

@@ -14,9 +14,11 @@ cso analyze --project-root <PROJECT_ROOT>
 cso analyze --json
 ```
 
-Analysis is read-only. It reports detected technologies, bounded file count, project-size heuristic, known agent-context evidence, profile recommendation, and skills that exist in the validated registry. Context evidence contains only repository-relative paths, kind, and conservative scope. CSO reads bounded bytes only to validate size and UTF-8 encoding; it never emits or interprets instruction content. A truncation warning means the result is incomplete.
+Analysis is read-only. It reports detected technologies, bounded file count, project-size heuristic, known agent-context evidence, profile recommendation, and skills that exist in the validated registry. Context evidence contains only repository-relative paths, kind, conservative scope, and an explicit `root`, `path-scoped`, or `unknown` scope state. CSO reads bounded bytes only to validate size and UTF-8 encoding; it never emits or interprets instruction content. A truncation warning means the result is incomplete.
 
 Context discovery recognizes `AGENTS.md`, `CLAUDE.md`, `.cursorrules`, direct `.cursor/rules/*.md` files, and `.github/copilot-instructions.md`. It emits at most 256 evidence records, scans at most 50,000 filesystem entries, and skips context files larger than 256,000 bytes. Cursor rule scope remains `unknown` when the path alone does not define it.
+
+The JSON document includes deterministic `scope_overlaps`, `conflicts`, and `conflict_analysis_complete` fields. Scope overlap records describe only same-scope or ancestor/descendant path relationships. Conflict records are limited to normalized-path collisions and duplicate source registrations, use stable IDs, and contain no instruction contents or machine identity. When discovery is incomplete, conflict analysis is also explicitly incomplete.
 
 Completion criterion: the command exits `0`, reports that no project files were modified, and does not create `.cso/`.
 
@@ -77,4 +79,4 @@ Completion criterion: every required check reports `PASS` and the command exits 
 
 ## Not included in the deterministic checkpoint
 
-This checkpoint does not provide remote skill installation, `cso sync`, lockfiles, conflict detection, permissions manifests, semantic context scoring, LLM recommendations, Codex API integration, GitHub bots, runtime sandboxing, or token accounting.
+This checkpoint does not provide remote skill installation, `cso sync`, lockfiles, natural-language contradiction detection, permissions manifests, semantic context scoring, LLM recommendations, Codex API integration, GitHub bots, runtime sandboxing, or token accounting.

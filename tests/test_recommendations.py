@@ -22,8 +22,12 @@ class RecommendationTests(unittest.TestCase):
                         "path": "AGENTS.md",
                         "kind": "agent-instructions",
                         "scope": ".",
+                        "scope_state": "root",
                     }
                 ],
+                "scope_overlaps": [],
+                "conflicts": [],
+                "conflict_analysis_complete": True,
                 "truncated": False,
             },
             "project": {"files_analyzed": 20, "size": "small", "truncated": False},

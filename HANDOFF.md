@@ -13,9 +13,9 @@
 
 ## Current Status
 
-- Phase: Cross-device adoption
-- Status: Cross-device adoption under validation
-- Blocker: Windows unit, smoke, release-audit, checksum, and path validation are still required.
+- Phase: Phase 3B — deterministic context scope conflicts
+- Status: Checkpoint B passed macOS validation and is ready for a checkpoint commit
+- Blocker: The new Checkpoint B commit requires Windows validation after the macOS checkpoint is pushed.
 
 ## Repository
 
@@ -24,23 +24,24 @@
 
 ## Current Branch
 
-- `main`
+- `phase3/context-skill-intelligence`
 
 ## Last Known Good Commit
 
-- Not established yet.
-- Commit `fab537209b1d9b21ced05e9456070baa94e56813` predates the cross-platform checksum fix and must not be treated as known-good.
+- `8bd07be73515c34846e3b5f683eec09a4a7e4b2b` is the current Mac/Windows verified Phase 3A checkpoint.
 
 ## Completed Work
 
 - Phase 1 provides bundled first-party routing, profiles, registry validation, checksums, dry-run, audit, activation, and rollback.
 - Windows and POSIX entry points use the same Python runtime and standard-library implementation.
 - Canonical LF policy and release-integrity validation pass macOS working-tree and fresh-checkout validation.
+- Phase 3A provides bounded, metadata-only context discovery with fail-closed link and reparse handling.
+- Phase 3B models root, path-scoped, and unknown scope states and reports deterministic structural overlap and conflict evidence.
 
 ## Pending Work
 
-- Run the listed Windows validation commands without changing the source checkout.
-- Establish a Last Known Good Commit only after both platforms pass from the same Git commit.
+- Validate the Phase 3B checkpoint on Windows without changing the source checkout.
+- Promote the new commit to Last Known Good only after both platforms pass the same Git commit.
 
 ## Architecture Decisions
 
@@ -49,6 +50,8 @@
 - Checksummed text payloads use Git-canonical LF bytes on every platform.
 - Registry, security index, and payload checksums fail closed when any value differs.
 - Background synchronization is fetch-first and never publishes local work.
+- Scope overlap is metadata, not proof of semantic contradiction.
+- Phase 3B conflicts are limited to normalized-path collisions and duplicate source registrations.
 
 ## Required Tools
 
@@ -96,12 +99,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/smoke.ps1
 
 ## Tests
 
-- macOS: 36 unit tests, POSIX smoke, release audit, checksum integrity, and fresh checkout passed on 2026-08-13.
-- Windows: not run for the adoption diff.
+- macOS: Phase 3B passed 91 unit tests, POSIX smoke, release audit, Python 3.9 grammar, diff checks, and integrity checks.
+- Windows: Phase 3A commit `8bd07be73515c34846e3b5f683eec09a4a7e4b2b` passed; Phase 3B is pending.
 
 ## Known Issues
 
-- Cross-device readiness remains blocked until Windows validates the same source revision.
+- Phase 3B cross-device readiness remains pending until Windows validates the new checkpoint revision.
 
 ## Security Notes
 
@@ -111,7 +114,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/smoke.ps1
 
 ## Next Recommended Action
 
-1. Validate the identical diff on Windows before committing or pushing.
+1. Validate the exact Phase 3B checkpoint commit on Windows after it is pushed.
 
 ## Last Handoff
 
@@ -119,7 +122,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/smoke.ps1
 - From platform: macOS
 - To platform: Windows
 - Prepared by: Codex
-- Local SHA: `fab537209b1d9b21ced05e9456070baa94e56813`
-- Remote SHA: `fab537209b1d9b21ced05e9456070baa94e56813`
+- Local SHA: `8bd07be73515c34846e3b5f683eec09a4a7e4b2b`
+- Remote SHA: `8bd07be73515c34846e3b5f683eec09a4a7e4b2b`
 - Sync: `0 behind / 0 ahead`
-- Worktree: `DIRTY — cross-device adoption changes are intentionally uncommitted`
+- Worktree: `CLEAN at the last cross-platform checkpoint`

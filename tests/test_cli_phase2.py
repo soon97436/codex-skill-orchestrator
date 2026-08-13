@@ -60,6 +60,16 @@ class PhaseTwoCliTests(unittest.TestCase):
         document = json.loads(first.stdout)
         self.assertEqual(document["recommended_profile"], "small-project")
         self.assertEqual(document["detected"][0]["technology"], "python")
+        self.assertEqual(
+            set(document["context"]),
+            {
+                "evidence",
+                "scope_overlaps",
+                "conflicts",
+                "conflict_analysis_complete",
+                "truncated",
+            },
+        )
         self.assertNotIn(str(project), first.stdout)
 
     def test_analyze_human_output_explains_context_evidence(self) -> None:
@@ -74,8 +84,20 @@ class PhaseTwoCliTests(unittest.TestCase):
         self.assertIn("AGENTS.md", result.stdout)
         self.assertIn("agent-instructions", result.stdout)
         self.assertIn("scope: .", result.stdout)
+        self.assertIn("scope state: root", result.stdout)
         self.assertNotIn("bytes", result.stdout)
         self.assertNotIn(str(project), result.stdout)
+
+    def test_incomplete_context_never_claims_conflict_analysis_is_complete(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="cso-cli-") as temporary:
+            project = Path(temporary)
+            (project / "AGENTS.md").write_bytes(b"x" * 256_001)
+
+            result = run_cso(project, "analyze")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Conflict analysis incomplete.", result.stdout)
+        self.assertNotIn("No deterministic context conflicts detected.", result.stdout)
 
     def test_init_yes_creates_only_expected_configuration(self) -> None:
         with tempfile.TemporaryDirectory(prefix="cso-cli-") as temporary:
