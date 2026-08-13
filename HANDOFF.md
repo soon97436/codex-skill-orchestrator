@@ -14,7 +14,7 @@
 ## Current Status
 
 - Phase: Phase 3G — final cross-platform release gate remediation
-- Status: Phase 3A–3F implementation and integration are complete, and the Phase 3F checkpoint passed macOS and Windows validation. Phase 3G found this stale handoff as a documentation defect; the current change is the minimal remediation candidate.
+- Status: Phase 3A–3F implementation and integration are complete, and the Phase 3F checkpoint passed macOS and Windows validation. The documentation remediation checkpoint is the current branch HEAD and has been pushed to origin.
 - Blocker: The documentation-only remediation checkpoint must pass the final Phase 3G gate on macOS and Windows. Phase 3H merge is not authorized.
 
 ## Repository
@@ -32,7 +32,7 @@
 - Commit: `cbdc20ccbbb040b093633db0330b015936c6ab64`
 - Tree: `a5206a2c6581f14da314d75350ae5c57bd1bf8b7`
 - Scope: Phase 3F cross-platform checkpoint; 63 tracked files and 146 tests passed on macOS and Windows.
-- The documentation-remediation commit that follows this LKG still requires Phase 3G validation on both platforms.
+- The current branch HEAD is the pushed documentation-remediation checkpoint and still requires Phase 3G validation on both platforms.
 
 ## Completed Work
 
@@ -48,8 +48,7 @@
 
 ## Pending Work
 
-- Validate this documentation-only remediation and create one documentation checkpoint.
-- Rerun the complete Phase 3G final release gate on macOS and Windows from that same commit.
+- Rerun the complete Phase 3G final release gate on macOS and Windows from the same current HEAD and tree.
 - Proceed to Phase 3H only after both platforms pass; main remains unchanged until then.
 
 ## Architecture Decisions
@@ -128,11 +127,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/smoke.ps1
 
 ## Next Recommended Action
 
-1. Validate the documentation-only remediation.
-2. Create one documentation checkpoint.
-3. Push it non-force to `phase3/context-skill-intelligence`.
-4. Rerun the Phase 3G final release gate on macOS and Windows.
-5. Proceed to Phase 3H only if both platforms pass.
+1. Rerun the complete Phase 3G final release gate on macOS.
+2. Rerun the complete Phase 3G final release gate on Windows.
+3. Require both platforms to validate the same current HEAD and tree.
+4. Proceed to Phase 3H only if both platforms pass.
 
 ## Last Handoff
 
@@ -142,6 +140,6 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/smoke.ps1
 - Prepared by: Codex
 - Verified Phase 3F commit: `cbdc20ccbbb040b093633db0330b015936c6ab64`
 - Verified Phase 3F tree: `a5206a2c6581f14da314d75350ae5c57bd1bf8b7`
-- Documentation remediation: `Pending checkpoint creation and Phase 3G validation`
-- Sync: `0 behind / 0 ahead at the Phase 3F LKG`
-- Worktree: `Documentation-only remediation candidate`
+- Documentation remediation: `Current branch HEAD is pushed; full macOS and Windows Phase 3G revalidation is pending`
+- Sync: `0 behind / 0 ahead at the current documentation-remediation checkpoint`
+- Worktree: `CLEAN after the documentation-remediation checkpoint push`
