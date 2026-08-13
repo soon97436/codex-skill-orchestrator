@@ -19,6 +19,23 @@ class SkillMetadataTests(unittest.TestCase):
                 self.assertIn("Find-CsoPython", content)
                 self.assertNotIn("$candidates =", content)
 
+    def test_windows_smoke_covers_phase_two_cli_without_network(self) -> None:
+        content = (ROOT / "scripts" / "smoke.ps1").read_text(encoding="utf-8")
+        for command in ("analyze", "init", "doctor"):
+            self.assertIn(f"'.\\installer\\cso.ps1' {command}", content)
+        self.assertIn("$projectFixtureRoot = Join-Path $temporaryRoot ('cso-project-fixture-'", content)
+        self.assertIn("$installerSmokeRoot = Join-Path $temporaryRoot ('cso-smoke-'", content)
+        self.assertIn("$stateRoot = Join-Path $installerSmokeRoot 'state'", content)
+        before_check = content.index("Installer smoke root existed before dry-run.")
+        dry_run = content.index("-DryRun -Json")
+        after_check = content.index("Dry-run created persistent files.")
+        self.assertLess(before_check, dry_run)
+        self.assertLess(dry_run, after_check)
+        self.assertIn("'cso-project-fixture-'", content)
+        self.assertIn("'cso-smoke-'", content)
+        self.assertNotIn("Invoke-WebRequest", content)
+        self.assertNotIn("Invoke-RestMethod", content)
+
     def test_skill_frontmatter_is_minimal_and_valid(self) -> None:
         content = (SKILL / "SKILL.md").read_text(encoding="utf-8")
         match = re.match(r"^---\n(.*?)\n---\n", content, re.DOTALL)

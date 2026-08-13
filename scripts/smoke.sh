@@ -27,6 +27,21 @@ else
 fi
 "$PYTHON" -m unittest discover -s tests -v
 
+PROJECT_FIXTURE="$SMOKE_ROOT/project"
+mkdir -p -- "$PROJECT_FIXTURE"
+printf '%s\n' '{"dependencies":{"react":"1"},"devDependencies":{"vitest":"1"}}' > "$PROJECT_FIXTURE/package.json"
+./installer/install.sh --help >/dev/null
+./installer/install.sh analyze --help >/dev/null
+./installer/install.sh init --help >/dev/null
+./installer/install.sh doctor --help >/dev/null
+./installer/install.sh analyze --project-root "$PROJECT_FIXTURE" >/dev/null
+test ! -e "$PROJECT_FIXTURE/.cso"
+./installer/install.sh analyze --project-root "$PROJECT_FIXTURE" --json >/dev/null
+test ! -e "$PROJECT_FIXTURE/.cso"
+./installer/install.sh init --project-root "$PROJECT_FIXTURE" --yes >/dev/null
+test -f "$PROJECT_FIXTURE/.cso/config.json"
+./installer/install.sh doctor --project-root "$PROJECT_FIXTURE" >/dev/null
+
 rm -rf -- "$SMOKE_ROOT"
 ./installer/install.sh install --profile universal --install-root "$STATE_ROOT" --skills-dir "$SKILLS_ROOT" --dry-run --json
 test ! -e "$SMOKE_ROOT"

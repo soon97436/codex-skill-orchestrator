@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
-from typing import Any, Dict, Optional, Sequence
+from typing import Any, Dict, Mapping, Optional, Sequence
 
 from . import __version__
+from .config import build_config, write_config
+from .doctor import run_doctor
 from .engine import (
     apply_profile,
     audit,
@@ -16,10 +19,12 @@ from .engine import (
     default_skills_dir,
     plan_install,
     profile_catalog,
+    project_root,
     rollback,
     route_task,
 )
 from .errors import OrchestratorError
+from .recommendations import analyze_and_recommend
 
 
 def _add_roots(parser: argparse.ArgumentParser) -> None:
@@ -31,6 +36,15 @@ def _add_json(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--json", action="store_true", help="Emit stable JSON output")
 
 
+def _add_project_root(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--project-root",
+        type=Path,
+        default=Path.cwd(),
+        help="Project to inspect (default: current directory)",
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="cso",
@@ -38,6 +52,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     subparsers = parser.add_subparsers(dest="command", required=True)
+
+    analyze = subparsers.add_parser("analyze", help="Analyze a project without modifying it")
+    _add_project_root(analyze)
+    _add_json(analyze)
+
+    init = subparsers.add_parser("init", help="Create a reviewed project-local CSO configuration")
+    _add_project_root(init)
+    init.add_argument("--yes", action="store_true", help="Accept recommendations without prompting")
+    init.add_argument("--force", action="store_true", help="Replace an existing safe .cso/config.json")
+
+    doctor = subparsers.add_parser("doctor", help="Run read-only CSO and environment health checks")
+    _add_project_root(doctor)
 
     profiles = subparsers.add_parser("profiles", help="List validated profiles")
     _add_json(profiles)
@@ -104,6 +130,58 @@ def _human_output(document: Any) -> str:
     return json.dumps(document, ensure_ascii=False, indent=2, sort_keys=True)
 
 
+def _human_analysis(document: Mapping[str, Any]) -> str:
+    lines = ["CSO Project Analysis", "", "Detected:"]
+    if document["detected"]:
+        for finding in document["detected"]:
+            lines.append(f"  {finding['technology']:<20} yes")
+    else:
+        lines.append("  No supported technology markers detected.")
+    project = document["project"]
+    lines.extend(
+        [
+            "",
+            "Project:",
+            f"  Files analyzed: {project['files_analyzed']}",
+            f"  Project size: {project['size']}",
+        ]
+    )
+    if project["truncated"]:
+        lines.append("  Warning: analysis was truncated at the configured traversal limit.")
+    lines.extend(["", "Recommended profile:", f"  {document['recommended_profile']}"])
+    lines.extend(["", "Recommended skills:"])
+    if document["recommended_skills"]:
+        for recommendation in document["recommended_skills"]:
+            lines.append(f"  {recommendation['skill']} (score: {recommendation['score']})")
+            for reason in recommendation["reasons"]:
+                lines.append(f"    reason: {reason}")
+    else:
+        lines.append("  No matching skills are present in the validated registry.")
+    for warning in document.get("warnings", []):
+        lines.append(f"Warning: {warning}")
+    lines.extend(
+        [
+            "",
+            "Security:",
+            "  No third-party code downloaded.",
+            "  No project files modified.",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def _human_doctor(document: Mapping[str, Any]) -> str:
+    lines = ["CSO Doctor", ""]
+    for check in document["checks"]:
+        label = check["name"].replace("_", " ").title()
+        lines.append(f"{label:<28} {check['status']}")
+        lines.append(f"  {check['message']}")
+        if check["name"] == "configuration" and check["status"] == "FAIL":
+            lines.append("  Run: cso init --force")
+    lines.extend(["", "Environment healthy." if document["status"] == "healthy" else "Environment needs attention."])
+    return "\n".join(lines)
+
+
 def _emit(document: Any, as_json: bool) -> None:
     if as_json:
         print(json.dumps(document, ensure_ascii=False, indent=2, sort_keys=True))
@@ -111,8 +189,52 @@ def _emit(document: Any, as_json: bool) -> None:
         print(_human_output(document))
 
 
+def _stdin_is_interactive(stream: Any) -> bool:
+    if not stream.isatty():
+        return False
+    try:
+        descriptor = stream.fileno()
+    except (AttributeError, OSError, ValueError):
+        return True
+    try:
+        os.get_terminal_size(descriptor)
+    except (OSError, ValueError):
+        return False
+    return True
+
+
 def run(args: argparse.Namespace) -> int:
     as_json = bool(getattr(args, "json", False))
+    if args.command == "analyze":
+        result = analyze_and_recommend(args.project_root, project_root())
+        if as_json:
+            _emit(result, True)
+        else:
+            print(_human_analysis(result))
+        return 0
+    if args.command == "init":
+        result = analyze_and_recommend(args.project_root, project_root())
+        print(_human_analysis(result))
+        if not args.yes:
+            if not _stdin_is_interactive(sys.stdin):
+                print("Initialization requires an interactive terminal. Run: cso init --yes", file=sys.stderr)
+                return 1
+            answer = input("Use this configuration? [Y/n] ").strip().casefold()
+            if answer not in {"", "y", "yes"}:
+                print("Initialization cancelled. No files were modified.")
+                return 0
+        document = build_config(
+            result,
+            profile=result["recommended_profile"],
+            recommendations=result["recommended_skills"],
+        )
+        write_config(args.project_root, document, force=args.force)
+        print("Configuration written: .cso/config.json")
+        return 0
+    if args.command == "doctor":
+        result = run_doctor(project_root(), args.project_root)
+        print(_human_doctor(result))
+        return 0 if result["status"] == "healthy" else 1
     if args.command == "profiles":
         result: Any = profile_catalog()
     elif args.command == "plan":
@@ -150,10 +272,12 @@ def run(args: argparse.Namespace) -> int:
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = build_parser()
     try:
-        return run(parser.parse_args(argv))
+        args = parser.parse_args(argv)
+        return run(args)
     except OrchestratorError as exc:
-        print(f"ERROR[{exc.exit_code}]: {exc}", file=sys.stderr)
-        return exc.exit_code
+        exit_code = 1 if args.command in {"analyze", "init", "doctor"} else exc.exit_code
+        print(f"ERROR[{exit_code}]: {exc}", file=sys.stderr)
+        return exit_code
     except KeyboardInterrupt:
         print("ERROR[130]: interrupted", file=sys.stderr)
         return 130

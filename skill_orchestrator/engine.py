@@ -31,8 +31,8 @@ from .validation import (
 
 ROUTER_SKILL_ID = "codex-skill-orchestrator"
 STATE_SCHEMA_VERSION = 1
-APP_DIRECTORIES = ("skill_orchestrator", "profiles", "registry", "security", "router")
-APP_FILES = ("LICENSE", "THIRD_PARTY.md")
+APP_DIRECTORIES = ("skill_orchestrator", "profiles", "registry", "schemas", "security", "router")
+APP_FILES = (".gitattributes", "LICENSE", "THIRD_PARTY.md")
 LAUNCHER_FILES = {
     "installer/cso.py": "bin/cso.py",
     "installer/cso.ps1": "bin/cso.ps1",

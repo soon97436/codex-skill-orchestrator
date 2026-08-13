@@ -1,8 +1,16 @@
 # Codex Skill Orchestrator
 
-Codex Skill Orchestrator is a small, cross-platform profile manager for Codex and compatible AI-agent skills. Install one lightweight router, then switch profiles instead of copying every workflow into one oversized `SKILL.md` or manually toggling skills one by one.
+Codex Skill Orchestrator (CSO) is a deterministic, local-first, cross-platform profile manager with explainable, registry-bounded recommendations. Analyze a repository before changing it:
 
-Phase 1 is intentionally local-only and fail-closed:
+```sh
+cso analyze
+cso init
+cso doctor
+```
+
+From a source checkout, use `./installer/install.sh` on macOS/Linux or `.\installer\cso.ps1` on Windows in place of `cso`. See the [30-second quickstart](docs/QUICKSTART.md).
+
+CSO is security-oriented by design:
 
 - installs the first-party router bundled in this repository;
 - never downloads or executes third-party code;
@@ -36,12 +44,15 @@ No package manager, administrator privileges, API key, or network connection is 
 
 ## Quick start
 
-Clone the repository, inspect the plan, then install.
+Clone the repository, analyze a project, create its optional declarative configuration, then check health.
 
 ### Windows PowerShell
 
 ```powershell
 Set-Location codex-skill-orchestrator
+.\installer\cso.ps1 analyze --project-root <PROJECT_ROOT>
+.\installer\cso.ps1 init --project-root <PROJECT_ROOT>
+.\installer\cso.ps1 doctor --project-root <PROJECT_ROOT>
 .\installer\install.ps1 -Action Install -Profile Universal -DryRun
 .\installer\install.ps1 -Action Install -Profile Universal
 ```
@@ -50,6 +61,9 @@ Set-Location codex-skill-orchestrator
 
 ```sh
 cd codex-skill-orchestrator
+./installer/install.sh analyze --project-root <PROJECT_ROOT>
+./installer/install.sh init --project-root <PROJECT_ROOT>
+./installer/install.sh doctor --project-root <PROJECT_ROOT>
 ./installer/install.sh install --profile universal --dry-run
 ./installer/install.sh install --profile universal
 ```
@@ -89,6 +103,9 @@ The installed launchers are also available without changing `PATH`:
 ## Commands
 
 ```text
+analyze                          Read-only project analysis and recommendations
+init                             Create .cso/config.json after confirmation
+doctor                           Check CSO, schemas, checksums, and project config
 profiles                         List validated profiles
 plan      --profile PROFILE      Print the deterministic installation plan
 install   --profile PROFILE      Install the app and selected router profile
@@ -120,6 +137,7 @@ installer/             PowerShell and POSIX entry points plus installed launcher
 router/                The lightweight first-party Codex skill
 profiles/              Versioned routing profiles and schema
 registry/              Skill provenance registry and schema
+schemas/               Project configuration schema
 security/              Allowlist policy and checked-in checksums
 skill_orchestrator/    Python standard-library engine and CLI
 scripts/               Smoke and release-audit helpers
@@ -135,10 +153,13 @@ python -m skill_orchestrator audit --json
 
 On Windows, run `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/smoke.ps1`. On macOS/Linux, run `sh scripts/smoke.sh`.
 
-## Phase 1 boundaries
+## Phase 2 P0 boundaries
 
 - No remote registry fetcher or archive extractor is included.
 - No third-party skill code is bundled.
+- Analysis uses bounded local metadata heuristics; it does not execute project commands or call an LLM.
+- Recommendations include only skills present in the validated registry.
+- Users may choose whether to version-control `.cso/config.json`; CSO does not add it to `.gitignore`.
 - Custom is a checked-in example slot in Phase 1; users edit a reviewed checkout rather than using a profile-editor command.
 - Profile capability hints are advisory; the host runtime remains responsible for skill discovery and permission enforcement.
 - Installation is user-scoped and does not modify host-wide Codex or Claude configuration.
