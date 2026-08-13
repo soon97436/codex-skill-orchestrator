@@ -59,6 +59,7 @@ class PhaseTwoCliTests(unittest.TestCase):
         self.assertEqual(first.stdout, second.stdout)
         document = json.loads(first.stdout)
         self.assertEqual(document["recommended_profile"], "small-project")
+        self.assertTrue(document["recommendations_complete"])
         self.assertEqual(document["detected"][0]["technology"], "python")
         self.assertEqual(
             set(document["context"]),
@@ -98,6 +99,8 @@ class PhaseTwoCliTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("Conflict analysis incomplete.", result.stdout)
         self.assertNotIn("No deterministic context conflicts detected.", result.stdout)
+        self.assertIn("Recommendation analysis incomplete", result.stdout)
+        self.assertNotIn("No matching skills are present", result.stdout)
 
     def test_init_yes_creates_only_expected_configuration(self) -> None:
         with tempfile.TemporaryDirectory(prefix="cso-cli-") as temporary:

@@ -82,6 +82,10 @@ The implementation security model is documented in [SECURITY.md](SECURITY.md) an
 
 Context evidence uses explicit `root`, `path-scoped`, or `unknown` scope states. CSO reports deterministic same-scope and ancestor/descendant overlap metadata without treating overlap alone as a contradiction. Checkpoint B reports only normalized-path collisions and duplicate source registrations as conflicts; it does not read, quote, or semantically compare instruction text. If discovery is incomplete, `conflict_analysis_complete` is `false` and CSO does not claim that no conflicts exist.
 
+## Scoped skill recommendations
+
+Recommendations remain strictly bounded by the validated registry. Repository technology, test-framework, CI, and application-technology signals produce only root-scoped candidates. Known `agent-instructions` context metadata may produce a `writing-for-agents` candidate at its explicit root or path scope; unknown or conflicted context is never used to invent a precise scope. Every recommendation contains deterministic structured reasons, and `recommendations_complete` is `false` whenever repository or context analysis is incomplete or conflicted. The current registry is intentionally small, so an empty recommendation list is valid and no missing skill ID is fabricated.
+
 ## Switch profiles
 
 From the source checkout:

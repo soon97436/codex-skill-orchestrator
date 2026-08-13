@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import unicodedata
 from pathlib import Path
-from typing import Any, Dict, List, Mapping
+from typing import Any, Dict, List, Mapping, Tuple
 
 from .analyzer import analyze_project
 from .validation import validate_registry
@@ -20,24 +21,47 @@ def recommend_profile(analysis: Mapping[str, Any]) -> str:
     return "universal"
 
 
+def recommendations_complete(analysis: Mapping[str, Any]) -> bool:
+    context = analysis.get("context", {})
+    return not (
+        analysis.get("truncated")
+        or analysis.get("project", {}).get("truncated")
+        or context.get("truncated")
+        or not context.get("conflict_analysis_complete", True)
+        or bool(context.get("conflicts"))
+    )
+
+
 def recommend_skills(
     analysis: Mapping[str, Any],
     registry: Mapping[str, Mapping[str, Any]],
 ) -> List[Dict[str, Any]]:
     technologies = {item["technology"] for item in analysis.get("detected", [])}
     frameworks = {item["framework"] for item in analysis.get("tests", [])}
-    candidates: Dict[str, Dict[str, Any]] = {}
+    candidates: Dict[Tuple[str, str], Dict[str, Any]] = {}
 
     if technologies:
-        reasons = ["source project detected"]
+        reasons = [
+            {"type": "repository-technology", "evidence": technology}
+            for technology in sorted(technologies)
+        ]
         if "github-actions" in technologies:
-            reasons.append("continuous integration detected")
-        candidates["code-review"] = {"skill": "code-review", "score": 90, "reasons": reasons}
+            reasons.append({"type": "continuous-integration", "evidence": "github-actions"})
+        candidates[("code-review", ".")] = {
+            "skill": "code-review",
+            "score": 90,
+            "scope": ".",
+            "reasons": reasons,
+        }
     if frameworks:
-        candidates["tdd"] = {
+        candidates[("tdd", ".")] = {
             "skill": "tdd",
             "score": 90,
-            "reasons": ["test framework detected: " + ", ".join(sorted(frameworks))],
+            "scope": ".",
+            "reasons": [
+                {"type": "test-framework", "evidence": framework}
+                for framework in sorted(frameworks)
+            ],
         }
     application_technologies = technologies & {
         "dotnet",
@@ -50,14 +74,60 @@ def recommend_skills(
         "rust",
     }
     if application_technologies:
-        candidates["diagnosing-bugs"] = {
+        candidates[("diagnosing-bugs", ".")] = {
             "skill": "diagnosing-bugs",
             "score": 70,
-            "reasons": ["application technology detected: " + ", ".join(sorted(application_technologies))],
+            "scope": ".",
+            "reasons": [
+                {"type": "application-technology", "evidence": technology}
+                for technology in sorted(application_technologies)
+            ],
         }
 
-    allowed = [item for skill, item in candidates.items() if skill in registry]
-    return sorted(allowed, key=lambda item: (-item["score"], item["skill"]))
+    context = analysis.get("context", {})
+    conflicted_paths = {
+        path
+        for conflict in context.get("conflicts", [])
+        for path in conflict.get("paths", [])
+    }
+    for evidence in context.get("evidence", []):
+        if evidence.get("kind") != "agent-instructions":
+            continue
+        if evidence.get("scope_state") not in {"root", "path-scoped"}:
+            continue
+        if evidence.get("path") in conflicted_paths:
+            continue
+        scope = evidence["scope"]
+        candidate = candidates.setdefault(
+            ("writing-for-agents", scope),
+            {
+                "skill": "writing-for-agents",
+                "score": 60,
+                "scope": scope,
+                "reasons": [],
+            },
+        )
+        candidate["reasons"].append(
+            {"type": "agent-context", "evidence": evidence["path"]}
+        )
+
+    allowed = [item for (skill, _scope), item in candidates.items() if skill in registry]
+    for item in allowed:
+        item["reasons"] = [
+            {"type": reason_type, "evidence": evidence}
+            for reason_type, evidence in sorted(
+                {(reason["type"], reason["evidence"]) for reason in item["reasons"]}
+            )
+        ]
+    return sorted(
+        allowed,
+        key=lambda item: (
+            -item["score"],
+            item["skill"],
+            unicodedata.normalize("NFC", item["scope"]).casefold(),
+            item["scope"],
+        ),
+    )
 
 
 def analyze_and_recommend(project_root: Path, source_root: Path) -> Dict[str, Any]:
@@ -67,4 +137,5 @@ def analyze_and_recommend(project_root: Path, source_root: Path) -> Dict[str, An
         **analysis,
         "recommended_profile": recommend_profile(analysis),
         "recommended_skills": recommend_skills(analysis, registry),
+        "recommendations_complete": recommendations_complete(analysis),
     }

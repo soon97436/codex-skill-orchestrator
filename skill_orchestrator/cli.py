@@ -176,9 +176,18 @@ def _human_analysis(document: Mapping[str, Any]) -> str:
     lines.extend(["", "Recommended skills:"])
     if document["recommended_skills"]:
         for recommendation in document["recommended_skills"]:
-            lines.append(f"  {recommendation['skill']} (score: {recommendation['score']})")
+            lines.append(
+                f"  {recommendation['skill']} "
+                f"(score: {recommendation['score']}; scope: {recommendation['scope']})"
+            )
             for reason in recommendation["reasons"]:
-                lines.append(f"    reason: {reason}")
+                lines.append(
+                    f"    reason: {reason['type']} — {reason['evidence']}"
+                )
+        if not document["recommendations_complete"]:
+            lines.append("  Warning: recommendation analysis incomplete; additional matches may exist.")
+    elif not document["recommendations_complete"]:
+        lines.append("  Recommendation analysis incomplete; additional matches may exist.")
     else:
         lines.append("  No matching skills are present in the validated registry.")
     for warning in document.get("warnings", []):

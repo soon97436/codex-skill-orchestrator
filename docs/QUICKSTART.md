@@ -20,6 +20,8 @@ Context discovery recognizes `AGENTS.md`, `CLAUDE.md`, `.cursorrules`, direct `.
 
 The JSON document includes deterministic `scope_overlaps`, `conflicts`, and `conflict_analysis_complete` fields. Scope overlap records describe only same-scope or ancestor/descendant path relationships. Conflict records are limited to normalized-path collisions and duplicate source registrations, use stable IDs, and contain no instruction contents or machine identity. When discovery is incomplete, conflict analysis is also explicitly incomplete.
 
+`recommended_skills` entries include `skill`, `score`, `scope`, and structured `reasons`. Repository technology, test framework, CI, and application-technology signals are root-scoped. An `agent-instructions` context record may contribute only at its explicit root or path scope; unknown or conflicted context does not contribute a scoped recommendation. `recommendations_complete` is `false` when traversal, context discovery, conflict analysis, or trusted context evidence is incomplete. All candidates are filtered against `registry/skills.json`; CSO never fabricates an unregistered skill ID.
+
 Completion criterion: the command exits `0`, reports that no project files were modified, and does not create `.cso/`.
 
 ## Initialize CSO
@@ -61,7 +63,7 @@ Completion criterion: `.cso/config.json` is UTF-8 canonical JSON ending in LF an
 }
 ```
 
-`profile` is selected conservatively from project size. `skills` contains only IDs present in `registry/skills.json`; it may be empty when no registered skill matches.
+`profile` is selected conservatively from project size. `skills` contains only IDs present in `registry/skills.json`; it may be empty when no registered skill matches. Project configuration remains skill-ID based and does not persist recommendation evidence or machine identity.
 
 ## Run doctor
 
