@@ -8,7 +8,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from skill_orchestrator.cli import main
+from skill_orchestrator.cli import _human_analysis, main
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -77,6 +77,34 @@ def run_cso_bytes(
 
 
 class PhaseTwoCliTests(unittest.TestCase):
+    def test_human_output_does_not_claim_exhaustive_absence_when_explanation_incomplete(self) -> None:
+        document = {
+            "detected": [],
+            "tests": [],
+            "context": {
+                "evidence": [],
+                "conflicts": [],
+                "conflict_analysis_complete": True,
+                "truncated": False,
+            },
+            "project": {"files_analyzed": 0, "size": "small", "truncated": False},
+            "recommended_profile": "small-project",
+            "recommended_skills": [],
+            "recommendations_complete": True,
+            "recommendation_explanations": {
+                "status": "incomplete",
+                "limitations": [
+                    {"reason_id": "recommendation.incomplete.explanation-limit"}
+                ],
+            },
+            "warnings": [],
+        }
+
+        output = _human_analysis(document)
+
+        self.assertIn("Recommendation explanation incomplete", output)
+        self.assertNotIn("No matching skills are present", output)
+
     def test_json_stdout_is_utf8_without_bom(self) -> None:
         with tempfile.TemporaryDirectory(prefix="cso-cli-") as temporary:
             project = Path(temporary)
@@ -161,6 +189,19 @@ class PhaseTwoCliTests(unittest.TestCase):
         document = json.loads(first.stdout)
         self.assertEqual(document["recommended_profile"], "small-project")
         self.assertTrue(document["recommendations_complete"])
+        self.assertEqual(
+            set(document["recommendation_explanations"]),
+            {
+                "schema_version",
+                "status",
+                "registry",
+                "selected",
+                "excluded",
+                "unmatched_signals",
+                "limitations",
+                "truncated",
+            },
+        )
         self.assertEqual(document["detected"][0]["technology"], "python")
         self.assertEqual(
             set(document["context"]),

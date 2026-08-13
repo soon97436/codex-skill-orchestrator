@@ -174,6 +174,10 @@ def _human_analysis(document: Mapping[str, Any]) -> str:
         lines.append("  Conflict analysis incomplete.")
     lines.extend(["", "Recommended profile:", f"  {document['recommended_profile']}"])
     lines.extend(["", "Recommended skills:"])
+    explanations_complete = (
+        document.get("recommendation_explanations", {}).get("status", "complete")
+        == "complete"
+    )
     if document["recommended_skills"]:
         for recommendation in document["recommended_skills"]:
             lines.append(
@@ -186,8 +190,12 @@ def _human_analysis(document: Mapping[str, Any]) -> str:
                 )
         if not document["recommendations_complete"]:
             lines.append("  Warning: recommendation analysis incomplete; additional matches may exist.")
+        elif not explanations_complete:
+            lines.append("  Warning: recommendation explanation incomplete; inspect JSON limitations.")
     elif not document["recommendations_complete"]:
         lines.append("  Recommendation analysis incomplete; additional matches may exist.")
+    elif not explanations_complete:
+        lines.append("  Recommendation explanation incomplete; inspect JSON limitations.")
     else:
         lines.append("  No matching skills are present in the validated registry.")
     for warning in document.get("warnings", []):
