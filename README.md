@@ -1,6 +1,6 @@
 # Codex Skill Orchestrator
 
-Codex Skill Orchestrator (CSO) is a deterministic, local-first, cross-platform profile manager with explainable, registry-bounded recommendations, bounded agent-context discovery, and structural context-conflict evidence. Analyze a repository before changing it:
+Codex Skill Orchestrator (CSO) is a deterministic, local-first control layer for repository context, skill selection, explainability, and reproducible agent configuration. It combines cross-platform profile management with bounded agent-context discovery, structural conflict evidence, registry-bounded recommendations, and declarative capability analysis. Analyze a repository before changing it:
 
 ```sh
 cso analyze
@@ -17,7 +17,8 @@ CSO is security-oriented by design:
 - uses only the Python standard library;
 - supports deterministic plans, zero-write dry runs, integrity audits, and conflict-safe rollback;
 - records source, version, license, and SHA-256 metadata for every bundled file;
-- keeps capability hints separate from installed third-party skills.
+- keeps capability hints separate from installed third-party skills;
+- reports capabilities as declarative audit metadata without claiming runtime sandbox enforcement.
 
 ## Profiles
 
@@ -41,6 +42,12 @@ Profiles contain routing policy and generic capability hints. A hint never insta
 - A POSIX-compatible `sh` for macOS/Linux
 
 No package manager, administrator privileges, API key, or network connection is required.
+
+### Validated platforms
+
+- macOS: validated for v0.1.0.
+- Windows: validated for v0.1.0.
+- Linux: supported by the POSIX entry points, but not yet formally release-gated.
 
 ## Quick start
 
@@ -85,6 +92,10 @@ Context evidence uses explicit `root`, `path-scoped`, or `unknown` scope states.
 ## Scoped skill recommendations
 
 Recommendations remain strictly bounded by the validated registry. Repository technology, test-framework, CI, and application-technology signals produce only root-scoped candidates. Known `agent-instructions` context metadata may produce a `writing-for-agents` candidate at its explicit root or path scope; unknown or conflicted context is never used to invent a precise scope. Every recommendation contains deterministic structured reasons, and `recommendations_complete` is `false` whenever repository or context analysis is incomplete or conflicted. The current registry is intentionally small, so an empty recommendation list is valid and no missing skill ID is fabricated.
+
+## Explainability and capability analysis
+
+Recommendation explanations use deterministic reason IDs and repository-relative metadata references. Capability analysis is registry-bounded and declarative-only; it does not enforce a runtime sandbox, intercept MCP or shell operations, or make network-policy decisions.
 
 ## Switch profiles
 

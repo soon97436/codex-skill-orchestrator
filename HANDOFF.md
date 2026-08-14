@@ -13,26 +13,25 @@
 
 ## Current Status
 
-- Phase: Phase 3G — final cross-platform release gate remediation
-- Status: Phase 3A–3F implementation and integration are complete, and the Phase 3F checkpoint passed macOS and Windows validation. The documentation remediation checkpoint is the current branch HEAD and has been pushed to origin.
-- Blocker: The documentation-only remediation checkpoint must pass the final Phase 3G gate on macOS and Windows. Phase 3H merge is not authorized.
+- Phase: v0.1.0 release preparation
+- Status: Phase 3A–3H are complete. PR #1 merged Phase 3 to `main`, and post-merge validation passed on macOS after the cross-platform release candidate passed macOS and Windows gates.
+- Release state: Release documentation is in preparation. The `v0.1.0` tag and GitHub Release do not yet exist, and Phase 4 has not started.
 
 ## Repository
 
 - Remote: `https://github.com/soon97436/codex-skill-orchestrator.git`
 - Source of truth: GitHub repository
-- Main: `8442408744915dc16806be4bf1c9d5c22eecf7ff`
+- Main: Phase 3 Main LKG `9eb31ebca0aece5150367ec47c37287925fab2f9`
 
 ## Current Branch
 
-- `phase3/context-skill-intelligence`
+- `release/v0.1.0`
 
-## Last Known Good Commit
+## Phase 3 Main LKG
 
-- Commit: `cbdc20ccbbb040b093633db0330b015936c6ab64`
-- Tree: `a5206a2c6581f14da314d75350ae5c57bd1bf8b7`
-- Scope: Phase 3F cross-platform checkpoint; 63 tracked files and 146 tests passed on macOS and Windows.
-- The current branch HEAD is the pushed documentation-remediation checkpoint and still requires Phase 3G validation on both platforms.
+- Commit: `9eb31ebca0aece5150367ec47c37287925fab2f9`
+- Tree: `82092a5c69d985fafbfd7248a7763f04ebfb236d`
+- Scope: Phase 3A–3H integrated through PR #1; 63 tracked files and 146 tests passed on merged `main`.
 
 ## Completed Work
 
@@ -45,11 +44,15 @@
 - Phase 3D adds deterministic recommendation explanations with registry-bounded evidence references and explicit limitations.
 - Phase 3E adds declarative capability analysis without runtime enforcement.
 - Phase 3F closes the integrated Phase 3 contract across recommendation, explanation, capability, privacy, trust, and determinism invariants.
+- Phase 3G passed the complete macOS and Windows release gates after stale HANDOFF state was corrected and both platforms revalidated the final candidate.
+- Phase 3H merged Phase 3 to `main` through PR #1 with a normal merge commit and completed post-merge validation.
 
 ## Pending Work
 
-- Rerun the complete Phase 3G final release gate on macOS and Windows from the same current HEAD and tree.
-- Proceed to Phase 3H only after both platforms pass; main remains unchanged until then.
+- Complete the v0.1.0 release-documentation PR.
+- Revalidate `main` after that PR is merged.
+- Tag the verified release commit as `v0.1.0` and create the GitHub Release in a separate checkpoint.
+- Consider Phase 4 only after the release is complete.
 
 ## Architecture Decisions
 
@@ -112,12 +115,13 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/smoke.ps1
 
 ## Tests
 
-- macOS: Phase 3F commit `cbdc20ccbbb040b093633db0330b015936c6ab64` passed 146 unit tests, POSIX smoke, release audit, Python 3.9 grammar, diff checks, canonical JSON, privacy, and integrity gates.
-- Windows: The same Phase 3F commit and tree passed the Windows unit, smoke, release-audit, portability, canonical JSON, privacy, and integrity gates.
+- macOS: Phase 3 Main LKG passed 146 unit tests, POSIX smoke, release audit, Python 3.9 grammar, diff checks, canonical JSON, privacy, and integrity gates.
+- Windows: The Phase 3 release candidate with tree `82092a5c69d985fafbfd7248a7763f04ebfb236d` passed the Windows unit, smoke, release-audit, portability, canonical JSON, privacy, and integrity gates before merge.
 
 ## Known Issues
 
-- Phase 3G remains blocked only by validation of the documentation-remediation checkpoint. The Phase 3F implementation checkpoint is cross-platform verified.
+- Linux has not yet passed a formal release gate.
+- Capability analysis remains declarative-only; runtime sandbox enforcement is not implemented.
 
 ## Security Notes
 
@@ -127,19 +131,19 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/smoke.ps1
 
 ## Next Recommended Action
 
-1. Rerun the complete Phase 3G final release gate on macOS.
-2. Rerun the complete Phase 3G final release gate on Windows.
-3. Require both platforms to validate the same current HEAD and tree.
-4. Proceed to Phase 3H only if both platforms pass.
+1. Complete and merge the v0.1.0 release-documentation PR.
+2. Validate the merged release-preparation `main`.
+3. Tag the verified release commit as `v0.1.0` and create the GitHub Release.
+4. Consider Phase 4 only after the release is complete.
 
 ## Last Handoff
 
-- Date: 2026-08-13
+- Date: 2026-08-14
 - From platform: macOS
-- To platform: macOS and Windows Phase 3G validation
+- To platform: v0.1.0 release-documentation review
 - Prepared by: Codex
-- Verified Phase 3F commit: `cbdc20ccbbb040b093633db0330b015936c6ab64`
-- Verified Phase 3F tree: `a5206a2c6581f14da314d75350ae5c57bd1bf8b7`
-- Documentation remediation: `Current branch HEAD is pushed; full macOS and Windows Phase 3G revalidation is pending`
-- Sync: `0 behind / 0 ahead at the current documentation-remediation checkpoint`
-- Worktree: `CLEAN after the documentation-remediation checkpoint push`
+- Phase 3 Main LKG commit: `9eb31ebca0aece5150367ec47c37287925fab2f9`
+- Phase 3 Main LKG tree: `82092a5c69d985fafbfd7248a7763f04ebfb236d`
+- Durable state: Phase 3 is merged and validated; release documentation is in preparation.
+- Sync: `main` was `0 behind / 0 ahead` before the release branch was created.
+- Worktree: Release-documentation changes are expected only on `release/v0.1.0`.
