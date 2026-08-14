@@ -11,27 +11,29 @@
 
 - Provide reviewed skill definitions and routing profiles through a cross-platform installer while keeping installed Codex Skills and runtime state machine-local.
 
-## Current Status
+## Validated Integration State
 
-- Phase: v0.1.0 release preparation
-- Status: Phase 3A–3H are complete. PR #1 merged Phase 3 to `main`, and post-merge validation passed on macOS after the cross-platform release candidate passed macOS and Windows gates.
-- Release state: Release documentation is in preparation. The `v0.1.0` tag and GitHub Release do not yet exist, and Phase 4 has not started.
+- Phase 3A–3H were integrated through PR #1 and validated at commit `9eb31ebca0aece5150367ec47c37287925fab2f9` with tree `82092a5c69d985fafbfd7248a7763f04ebfb236d`.
+- The v0.1.0 release documentation was integrated through PR #2 at commit `a19c2c724914fa9b838000b119a5822933c80034` with tree `f136b69bbe64be67fc4fe70eee12667823d9317d`.
+- Git tags and GitHub Releases are authoritative for published release state. This handoff records validated integration history and the release procedure; it does not mirror a live branch, tag, or release state.
 
 ## Repository
 
 - Remote: `https://github.com/soon97436/codex-skill-orchestrator.git`
 - Source of truth: GitHub repository
-- Main: Phase 3 Main LKG `9eb31ebca0aece5150367ec47c37287925fab2f9`
+- Published release authority: Git tags and GitHub Releases
+- Handoff authority: validated integration history and reusable release procedure
 
-## Current Branch
+## Immutable Integration History
 
-- `release/v0.1.0`
-
-## Phase 3 Main LKG
-
-- Commit: `9eb31ebca0aece5150367ec47c37287925fab2f9`
-- Tree: `82092a5c69d985fafbfd7248a7763f04ebfb236d`
-- Scope: Phase 3A–3H integrated through PR #1; 63 tracked files and 146 tests passed on merged `main`.
+- Phase 3 Main LKG before the release-documentation merge:
+  - Commit: `9eb31ebca0aece5150367ec47c37287925fab2f9`
+  - Tree: `82092a5c69d985fafbfd7248a7763f04ebfb236d`
+  - Integration: PR #1 merged Phase 3A–3H; 63 tracked files and 146 tests passed on merged `main`.
+- v0.1.0 release-documentation merge result:
+  - Commit: `a19c2c724914fa9b838000b119a5822933c80034`
+  - Tree: `f136b69bbe64be67fc4fe70eee12667823d9317d`
+  - Integration: PR #2 merged the reviewed v0.1.0 release documentation.
 
 ## Completed Work
 
@@ -46,13 +48,18 @@
 - Phase 3F closes the integrated Phase 3 contract across recommendation, explanation, capability, privacy, trust, and determinism invariants.
 - Phase 3G passed the complete macOS and Windows release gates after stale HANDOFF state was corrected and both platforms revalidated the final candidate.
 - Phase 3H merged Phase 3 to `main` through PR #1 with a normal merge commit and completed post-merge validation.
+- PR #2 merged the reviewed v0.1.0 release documentation to `main` with a normal merge commit.
 
-## Pending Work
+## Release Procedure
 
-- Complete the v0.1.0 release-documentation PR.
-- Revalidate `main` after that PR is merged.
-- Tag the verified release commit as `v0.1.0` and create the GitHub Release in a separate checkpoint.
-- Consider Phase 4 only after the release is complete.
+1. Validate the exact candidate commit and tree on `main`.
+2. Confirm that release documentation is internally consistent with that candidate.
+3. Run the complete cross-platform and release gate.
+4. Create a release tag only for the verified commit.
+5. Verify that the tag resolves to the intended commit and tree.
+6. Create the GitHub Release from that verified tag.
+
+After publication, use the Git tag and GitHub Release metadata as the authority for published state. Start future development from the latest validated `main` rather than from a release branch or a recorded worktree state.
 
 ## Architecture Decisions
 
@@ -120,8 +127,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/smoke.ps1
 
 ## Known Issues
 
-- Linux has not yet passed a formal release gate.
-- Capability analysis remains declarative-only; runtime sandbox enforcement is not implemented.
+- The recorded v0.1.0 validation evidence does not include a formal Linux release gate.
+- In the recorded v0.1.0 architecture, capability analysis is declarative-only; runtime sandbox enforcement is not implemented.
 
 ## Security Notes
 
@@ -129,21 +136,15 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/smoke.ps1
 - Release audit must fail on profile, registry, manifest, payload, unsafe-path, or secret findings.
 - Credentials copied or committed: `NO`
 
-## Next Recommended Action
-
-1. Complete and merge the v0.1.0 release-documentation PR.
-2. Validate the merged release-preparation `main`.
-3. Tag the verified release commit as `v0.1.0` and create the GitHub Release.
-4. Consider Phase 4 only after the release is complete.
-
 ## Last Handoff
 
 - Date: 2026-08-14
 - From platform: macOS
-- To platform: v0.1.0 release-documentation review
 - Prepared by: Codex
 - Phase 3 Main LKG commit: `9eb31ebca0aece5150367ec47c37287925fab2f9`
 - Phase 3 Main LKG tree: `82092a5c69d985fafbfd7248a7763f04ebfb236d`
-- Durable state: Phase 3 is merged and validated; release documentation is in preparation.
-- Sync: `main` was `0 behind / 0 ahead` before the release branch was created.
-- Worktree: Release-documentation changes are expected only on `release/v0.1.0`.
+- Release-documentation merge commit: `a19c2c724914fa9b838000b119a5822933c80034`
+- Release-documentation merge tree: `f136b69bbe64be67fc4fe70eee12667823d9317d`
+- Durable state: Phase 3 and the v0.1.0 release documentation were integrated through reviewed merge commits and are ready for exact-commit release validation.
+- Publication state: Determine it from Git tags and GitHub Releases, not from this document.
+- Continuation rule: Start future work from the latest validated `main` and apply the release procedure above when publishing a release.
