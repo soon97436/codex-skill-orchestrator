@@ -148,13 +148,54 @@ def _human_analysis(document: Mapping[str, Any]) -> str:
     )
     if project["truncated"]:
         lines.append("  Warning: analysis was truncated at the configured traversal limit.")
+    lines.extend(["", "Context evidence:"])
+    context = document["context"]
+    if context["evidence"]:
+        for evidence in context["evidence"]:
+            lines.append(
+                f"  {evidence['path']} ({evidence['kind']}; scope: {evidence['scope']}; "
+                f"scope state: {evidence['scope_state']})"
+            )
+    else:
+        lines.append("  No known agent context files discovered.")
+    if context["truncated"]:
+        lines.append("  Warning: context discovery was truncated.")
+    lines.extend(["", "Context conflicts:"])
+    if context["conflicts"]:
+        for conflict in context["conflicts"]:
+            lines.append(
+                f"  {conflict['severity'].upper()} {conflict['id']}: "
+                f"{', '.join(conflict['paths'])} (scope: {conflict['scope']}; "
+                f"reason: {conflict['reason']})"
+            )
+    elif context["conflict_analysis_complete"]:
+        lines.append("  No deterministic context conflicts detected.")
+    else:
+        lines.append("  Conflict analysis incomplete.")
     lines.extend(["", "Recommended profile:", f"  {document['recommended_profile']}"])
     lines.extend(["", "Recommended skills:"])
+    explanations_complete = (
+        document.get("recommendation_explanations", {}).get("status", "complete")
+        == "complete"
+    )
     if document["recommended_skills"]:
         for recommendation in document["recommended_skills"]:
-            lines.append(f"  {recommendation['skill']} (score: {recommendation['score']})")
+            lines.append(
+                f"  {recommendation['skill']} "
+                f"(score: {recommendation['score']}; scope: {recommendation['scope']})"
+            )
             for reason in recommendation["reasons"]:
-                lines.append(f"    reason: {reason}")
+                lines.append(
+                    f"    reason: {reason['type']} — {reason['evidence']}"
+                )
+        if not document["recommendations_complete"]:
+            lines.append("  Warning: recommendation analysis incomplete; additional matches may exist.")
+        elif not explanations_complete:
+            lines.append("  Warning: recommendation explanation incomplete; inspect JSON limitations.")
+    elif not document["recommendations_complete"]:
+        lines.append("  Recommendation analysis incomplete; additional matches may exist.")
+    elif not explanations_complete:
+        lines.append("  Recommendation explanation incomplete; inspect JSON limitations.")
     else:
         lines.append("  No matching skills are present in the validated registry.")
     for warning in document.get("warnings", []):
@@ -182,9 +223,24 @@ def _human_doctor(document: Mapping[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _write_json_stdout(document: Any, stream: Optional[Any] = None) -> None:
+    output = sys.stdout if stream is None else stream
+    payload = (
+        json.dumps(document, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    ).encode("utf-8")
+    binary_output = getattr(output, "buffer", None)
+    if binary_output is not None:
+        output.flush()
+        binary_output.write(payload)
+        binary_output.flush()
+        return
+    output.write(payload.decode("utf-8"))
+    output.flush()
+
+
 def _emit(document: Any, as_json: bool) -> None:
     if as_json:
-        print(json.dumps(document, ensure_ascii=False, indent=2, sort_keys=True))
+        _write_json_stdout(document)
     else:
         print(_human_output(document))
 

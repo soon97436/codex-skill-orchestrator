@@ -1,6 +1,6 @@
 # Codex Skill Orchestrator
 
-Codex Skill Orchestrator (CSO) is a deterministic, local-first, cross-platform profile manager with explainable, registry-bounded recommendations. Analyze a repository before changing it:
+Codex Skill Orchestrator (CSO) is a deterministic, local-first, cross-platform profile manager with explainable, registry-bounded recommendations, bounded agent-context discovery, and structural context-conflict evidence. Analyze a repository before changing it:
 
 ```sh
 cso analyze
@@ -78,6 +78,14 @@ Use [HANDOFF.md](HANDOFF.md) for current project state and [docs/CROSS_DEVICE_WO
 
 The implementation security model is documented in [SECURITY.md](SECURITY.md) and [security/policy.md](security/policy.md).
 
+## Context scope and conflicts
+
+Context evidence uses explicit `root`, `path-scoped`, or `unknown` scope states. CSO reports deterministic same-scope and ancestor/descendant overlap metadata without treating overlap alone as a contradiction. Checkpoint B reports only normalized-path collisions and duplicate source registrations as conflicts; it does not read, quote, or semantically compare instruction text. If discovery is incomplete, `conflict_analysis_complete` is `false` and CSO does not claim that no conflicts exist.
+
+## Scoped skill recommendations
+
+Recommendations remain strictly bounded by the validated registry. Repository technology, test-framework, CI, and application-technology signals produce only root-scoped candidates. Known `agent-instructions` context metadata may produce a `writing-for-agents` candidate at its explicit root or path scope; unknown or conflicted context is never used to invent a precise scope. Every recommendation contains deterministic structured reasons, and `recommendations_complete` is `false` whenever repository or context analysis is incomplete or conflicted. The current registry is intentionally small, so an empty recommendation list is valid and no missing skill ID is fabricated.
+
 ## Switch profiles
 
 From the source checkout:
@@ -153,11 +161,12 @@ python -m skill_orchestrator audit --json
 
 On Windows, run `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/smoke.ps1`. On macOS/Linux, run `sh scripts/smoke.sh`.
 
-## Phase 2 P0 boundaries
+## Deterministic checkpoint boundaries
 
 - No remote registry fetcher or archive extractor is included.
 - No third-party skill code is bundled.
 - Analysis uses bounded local metadata heuristics; it does not execute project commands or call an LLM.
+- Context discovery reports only repository-relative path, kind, and conservative scope for known instruction files. It reads at most 256,001 bytes only to validate size and UTF-8 encoding; it never emits or interprets instruction content.
 - Recommendations include only skills present in the validated registry.
 - Users may choose whether to version-control `.cso/config.json`; CSO does not add it to `.gitignore`.
 - Custom is a checked-in example slot in Phase 1; users edit a reviewed checkout rather than using a profile-editor command.

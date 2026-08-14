@@ -14,7 +14,13 @@ cso analyze --project-root <PROJECT_ROOT>
 cso analyze --json
 ```
 
-Analysis is read-only. It reports detected technologies, bounded file count, project-size heuristic, profile recommendation, and skills that exist in the validated registry. A truncation warning means the file count and size are incomplete.
+Analysis is read-only. It reports detected technologies, bounded file count, project-size heuristic, known agent-context evidence, profile recommendation, and skills that exist in the validated registry. Context evidence contains only repository-relative paths, kind, conservative scope, and an explicit `root`, `path-scoped`, or `unknown` scope state. CSO reads bounded bytes only to validate size and UTF-8 encoding; it never emits or interprets instruction content. A truncation warning means the result is incomplete.
+
+Context discovery recognizes `AGENTS.md`, `CLAUDE.md`, `.cursorrules`, direct `.cursor/rules/*.md` files, and `.github/copilot-instructions.md`. It emits at most 256 evidence records, scans at most 50,000 filesystem entries, and skips context files larger than 256,000 bytes. Cursor rule scope remains `unknown` when the path alone does not define it.
+
+The JSON document includes deterministic `scope_overlaps`, `conflicts`, and `conflict_analysis_complete` fields. Scope overlap records describe only same-scope or ancestor/descendant path relationships. Conflict records are limited to normalized-path collisions and duplicate source registrations, use stable IDs, and contain no instruction contents or machine identity. When discovery is incomplete, conflict analysis is also explicitly incomplete.
+
+`recommended_skills` entries include `skill`, `score`, `scope`, and structured `reasons`. Repository technology, test framework, CI, and application-technology signals are root-scoped. An `agent-instructions` context record may contribute only at its explicit root or path scope; unknown or conflicted context does not contribute a scoped recommendation. `recommendations_complete` is `false` when traversal, context discovery, conflict analysis, or trusted context evidence is incomplete. All candidates are filtered against `registry/skills.json`; CSO never fabricates an unregistered skill ID.
 
 Completion criterion: the command exits `0`, reports that no project files were modified, and does not create `.cso/`.
 
@@ -57,7 +63,7 @@ Completion criterion: `.cso/config.json` is UTF-8 canonical JSON ending in LF an
 }
 ```
 
-`profile` is selected conservatively from project size. `skills` contains only IDs present in `registry/skills.json`; it may be empty when no registered skill matches.
+`profile` is selected conservatively from project size. `skills` contains only IDs present in `registry/skills.json`; it may be empty when no registered skill matches. Project configuration remains skill-ID based and does not persist recommendation evidence or machine identity.
 
 ## Run doctor
 
@@ -73,6 +79,6 @@ Completion criterion: every required check reports `PASS` and the command exits 
 
 `analyze`, `init`, and `doctor` require no API key or network connection. They do not download skills, inspect credentials, read `.env` content, send telemetry, or execute third-party commands.
 
-## Not included in Phase 2 P0
+## Not included in the deterministic checkpoint
 
-This phase does not provide remote skill installation, `cso sync`, lockfiles, conflict detection, permissions manifests, LLM recommendations, Codex API integration, GitHub bots, runtime sandboxing, or token accounting.
+This checkpoint does not provide remote skill installation, `cso sync`, lockfiles, natural-language contradiction detection, permissions manifests, semantic context scoring, LLM recommendations, Codex API integration, GitHub bots, runtime sandboxing, or token accounting.

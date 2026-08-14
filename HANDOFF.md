@@ -13,34 +13,43 @@
 
 ## Current Status
 
-- Phase: Cross-device adoption
-- Status: Cross-device adoption under validation
-- Blocker: Windows unit, smoke, release-audit, checksum, and path validation are still required.
+- Phase: Phase 3G — final cross-platform release gate remediation
+- Status: Phase 3A–3F implementation and integration are complete, and the Phase 3F checkpoint passed macOS and Windows validation. The documentation remediation checkpoint is the current branch HEAD and has been pushed to origin.
+- Blocker: The documentation-only remediation checkpoint must pass the final Phase 3G gate on macOS and Windows. Phase 3H merge is not authorized.
 
 ## Repository
 
 - Remote: `https://github.com/soon97436/codex-skill-orchestrator.git`
 - Source of truth: GitHub repository
+- Main: `8442408744915dc16806be4bf1c9d5c22eecf7ff`
 
 ## Current Branch
 
-- `main`
+- `phase3/context-skill-intelligence`
 
 ## Last Known Good Commit
 
-- Not established yet.
-- Commit `fab537209b1d9b21ced05e9456070baa94e56813` predates the cross-platform checksum fix and must not be treated as known-good.
+- Commit: `cbdc20ccbbb040b093633db0330b015936c6ab64`
+- Tree: `a5206a2c6581f14da314d75350ae5c57bd1bf8b7`
+- Scope: Phase 3F cross-platform checkpoint; 63 tracked files and 146 tests passed on macOS and Windows.
+- The current branch HEAD is the pushed documentation-remediation checkpoint and still requires Phase 3G validation on both platforms.
 
 ## Completed Work
 
 - Phase 1 provides bundled first-party routing, profiles, registry validation, checksums, dry-run, audit, activation, and rollback.
 - Windows and POSIX entry points use the same Python runtime and standard-library implementation.
 - Canonical LF policy and release-integrity validation pass macOS working-tree and fresh-checkout validation.
+- Phase 3A provides bounded, metadata-only context discovery with fail-closed link and reparse handling.
+- Phase 3B models root, path-scoped, and unknown scope states and reports deterministic structural overlap and conflict evidence.
+- Phase 3C adds registry-bounded scoped recommendations with structured reasons and explicit completeness.
+- Phase 3D adds deterministic recommendation explanations with registry-bounded evidence references and explicit limitations.
+- Phase 3E adds declarative capability analysis without runtime enforcement.
+- Phase 3F closes the integrated Phase 3 contract across recommendation, explanation, capability, privacy, trust, and determinism invariants.
 
 ## Pending Work
 
-- Run the listed Windows validation commands without changing the source checkout.
-- Establish a Last Known Good Commit only after both platforms pass from the same Git commit.
+- Rerun the complete Phase 3G final release gate on macOS and Windows from the same current HEAD and tree.
+- Proceed to Phase 3H only after both platforms pass; main remains unchanged until then.
 
 ## Architecture Decisions
 
@@ -49,6 +58,13 @@
 - Checksummed text payloads use Git-canonical LF bytes on every platform.
 - Registry, security index, and payload checksums fail closed when any value differs.
 - Background synchronization is fetch-first and never publishes local work.
+- Scope overlap is metadata, not proof of semantic contradiction.
+- Phase 3B conflicts are limited to normalized-path collisions and duplicate source registrations.
+- Recommendation candidates are deterministic ID mappings filtered through the validated registry; registry expansion remains a separate security decision.
+- Unknown or conflicted context does not contribute trusted scoped recommendation evidence.
+- Recommendation explanations and capability findings remain deterministic, metadata-only, and registry-bounded.
+- Capability declarations are audit metadata only; enforcement status remains `not-implemented`.
+- Recommendation completeness, explanation completeness, and capability-analysis completeness remain distinct.
 
 ## Required Tools
 
@@ -96,12 +112,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/smoke.ps1
 
 ## Tests
 
-- macOS: 36 unit tests, POSIX smoke, release audit, checksum integrity, and fresh checkout passed on 2026-08-13.
-- Windows: not run for the adoption diff.
+- macOS: Phase 3F commit `cbdc20ccbbb040b093633db0330b015936c6ab64` passed 146 unit tests, POSIX smoke, release audit, Python 3.9 grammar, diff checks, canonical JSON, privacy, and integrity gates.
+- Windows: The same Phase 3F commit and tree passed the Windows unit, smoke, release-audit, portability, canonical JSON, privacy, and integrity gates.
 
 ## Known Issues
 
-- Cross-device readiness remains blocked until Windows validates the same source revision.
+- Phase 3G remains blocked only by validation of the documentation-remediation checkpoint. The Phase 3F implementation checkpoint is cross-platform verified.
 
 ## Security Notes
 
@@ -111,15 +127,19 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/smoke.ps1
 
 ## Next Recommended Action
 
-1. Validate the identical diff on Windows before committing or pushing.
+1. Rerun the complete Phase 3G final release gate on macOS.
+2. Rerun the complete Phase 3G final release gate on Windows.
+3. Require both platforms to validate the same current HEAD and tree.
+4. Proceed to Phase 3H only if both platforms pass.
 
 ## Last Handoff
 
 - Date: 2026-08-13
 - From platform: macOS
-- To platform: Windows
+- To platform: macOS and Windows Phase 3G validation
 - Prepared by: Codex
-- Local SHA: `fab537209b1d9b21ced05e9456070baa94e56813`
-- Remote SHA: `fab537209b1d9b21ced05e9456070baa94e56813`
-- Sync: `0 behind / 0 ahead`
-- Worktree: `DIRTY — cross-device adoption changes are intentionally uncommitted`
+- Verified Phase 3F commit: `cbdc20ccbbb040b093633db0330b015936c6ab64`
+- Verified Phase 3F tree: `a5206a2c6581f14da314d75350ae5c57bd1bf8b7`
+- Documentation remediation: `Current branch HEAD is pushed; full macOS and Windows Phase 3G revalidation is pending`
+- Sync: `0 behind / 0 ahead at the current documentation-remediation checkpoint`
+- Worktree: `CLEAN after the documentation-remediation checkpoint push`
