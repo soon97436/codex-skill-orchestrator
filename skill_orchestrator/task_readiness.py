@@ -72,6 +72,8 @@ def analyze_task_readiness(
     if not isinstance(task_input, (str, bytes)):
         return _result("invalid-type")
     if isinstance(task_input, str):
+        if task_input.startswith("\ufeff"):
+            task_input = task_input[1:]
         if len(task_input) > MAX_TASK_INPUT_BYTES:
             return _result("too-large")
         try:
@@ -81,14 +83,14 @@ def analyze_task_readiness(
         if len(encoded) > MAX_TASK_INPUT_BYTES:
             return _result("too-large")
     else:
+        if task_input.startswith(b"\xef\xbb\xbf"):
+            task_input = task_input[3:]
         if len(task_input) > MAX_TASK_INPUT_BYTES:
             return _result("too-large")
         try:
             task_input = task_input.decode("utf-8", errors="strict")
         except UnicodeDecodeError:
             return _result("invalid-utf8")
-    if task_input.startswith("\ufeff"):
-        task_input = task_input[1:]
     if "\x00" in task_input:
         return _result("invalid-nul")
     if all(

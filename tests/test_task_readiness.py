@@ -145,6 +145,38 @@ class TaskReadinessTests(unittest.TestCase):
             "present",
         )
 
+    def test_task_readiness_str_bom_exact_bound(self) -> None:
+        self.assertDecision(
+            "\ufeff" + ("a" * MAX_TASK_INPUT_BYTES),
+            "structurally-ready",
+            "task.readiness.input-present",
+            "present",
+        )
+
+    def test_task_readiness_bytes_bom_exact_bound(self) -> None:
+        self.assertDecision(
+            b"\xef\xbb\xbf" + (b"a" * MAX_TASK_INPUT_BYTES),
+            "structurally-ready",
+            "task.readiness.input-present",
+            "present",
+        )
+
+    def test_task_readiness_str_bom_over_bound(self) -> None:
+        self.assertDecision(
+            "\ufeff" + ("a" * (MAX_TASK_INPUT_BYTES + 1)),
+            "invalid",
+            "task.readiness.input-too-large",
+            "too-large",
+        )
+
+    def test_task_readiness_bytes_bom_over_bound(self) -> None:
+        self.assertDecision(
+            b"\xef\xbb\xbf" + (b"a" * (MAX_TASK_INPUT_BYTES + 1)),
+            "invalid",
+            "task.readiness.input-too-large",
+            "too-large",
+        )
+
     def test_task_readiness_multibyte_over_bound(self) -> None:
         self.assertDecision(
             "界" * (MAX_TASK_INPUT_BYTES // 3 + 1),
