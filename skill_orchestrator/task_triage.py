@@ -1,4 +1,4 @@
-"""Deterministic, metadata-only task triage across five safety layers."""
+"""Deterministic, metadata-only assurance triage across five safety layers."""
 
 from __future__ import annotations
 

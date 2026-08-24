@@ -1,11 +1,12 @@
-# Phase 5A Task Triage Architecture
+# Phase 7A — Deterministic Assurance Triage Architecture
 
 ## Purpose
 
-Phase 5A adds a small, deterministic structural triage primitive above the
-Phase 4 foundations. It recommends one safety layer for a task request:
+Phase 7A adds a small, deterministic structural assurance-triage primitive
+above the Phase 4 foundations. It recommends one safety layer for a task
+request:
 
-| Layer | Meaning | Phase 5A behavior |
+| Layer | Meaning | Phase 7A behavior |
 | --- | --- | --- |
 | L1 Prompt | Direct handling of a structurally present task | Select only |
 | L2 Context | Explicit external context or document requirement | Select only |
@@ -16,6 +17,23 @@ Phase 4 foundations. It recommends one safety layer for a task request:
 The module does not execute, schedule, graph, approve, install, or route a
 skill. A selected layer is a recommendation for a later workflow; it is not a
 claim that the task is semantically complete or safe to execute.
+
+## Roadmap boundary
+
+The phase number is intentionally separate from the existing platform
+roadmap:
+
+- Phase 5 = Registry & Trust
+- Phase 6 = Reproducibility
+- Phase 7 = Assurance Triage
+- Phase 8 = Context Planner / L2
+- Phase 9 = Harness / L3
+- Phase 10 = Loop / L4
+- Phase 11 = Graph / State / Approval / L5
+
+This document and the core module implement only Phase 7A. Phase 7B and later
+Phase 7 work are not implemented. Phases 8–11 are roadmap boundaries, not
+runtime capabilities of this checkpoint.
 
 ## Public seam
 
@@ -41,6 +59,22 @@ mapping selects L1; omitting the mapping leaves complexity unknown and returns
 malformed UTF-8, NULs, and oversized task input fail closed. No
 natural-language keyword, grammar, locale, or prompt heuristic is inspected.
 
+The assurance floor for future integrations is defined as:
+
+```text
+effective_level = max(
+    deterministic_floor,
+    repository_policy,
+    requested_level,
+    optional_ai_recommendation,
+)
+```
+
+An optional AI recommendation may raise assurance, but must never lower the
+deterministic floor. Phase 7A computes only the structural deterministic
+selection; it does not implement `repository_policy`, AI routing, or any
+runtime escalation mechanism.
+
 ## Result contract
 
 The result is metadata-only and has stable fields:
@@ -65,7 +99,7 @@ execution readiness.
 
 ## Selection rules
 
-Phase 5A uses a fixed precedence, evaluated independently of mapping order:
+Phase 7A uses a fixed precedence, evaluated independently of mapping order:
 
 1. `graph` or `human_approval` → L5
 2. `loop` → L4
@@ -106,16 +140,16 @@ machine identity, environment values, or timestamps.
 
 ## Phase 4 responsibility boundaries
 
-- Phase 4A remains the sole task-input structural adapter. Phase 5A consumes
+- Phase 4A remains the sole task-input structural adapter. Phase 7A consumes
   its metadata result and does not duplicate its UTF-8, BOM, whitespace, NUL,
   or size rules.
-- Phase 4B remains the acceptance-criteria structural validator. Phase 5A
+- Phase 4B remains the acceptance-criteria structural validator. Phase 7A
   does not infer, validate, or satisfy criteria.
 - Phase 4C remains explicit workflow-profile selection. Layer selection is a
   separate safety recommendation and does not select profiles or skill IDs.
-- Phase 4D remains evidence-coverage evaluation. Phase 5A does not execute or
+- Phase 4D remains evidence-coverage evaluation. Phase 7A does not execute or
   verify work and does not claim completion.
-- Phase 4E remains the cross-platform release gate. Phase 5A does not add a
+- Phase 4E remains the cross-platform release gate. Phase 7A does not add a
   CLI or release gate integration.
 - The registry remains the sole trusted skill-ID source. This module emits no
   skill identifier and never resolves a registry entry.
@@ -127,11 +161,12 @@ LLM, repository-discovery, or remote-registry dependency. Task text is inert
 data. It uses fixed ordering and Phase 4A's explicit Unicode behavior, so
 line endings, locale, platform, and input mapping order cannot change the
 decision. Canonical JSON remains an existing caller concern; no CLI surface
-is introduced in Phase 5A.
+is introduced in Phase 7A.
 
 ## Deferred work
 
 L3 harness execution, L4 validation loops, L5 graph/state orchestration,
 human approval UX, task-to-repository context binding, workflow integration,
-and CLI exposure require separate phases and contracts. They must not be
-implemented by extending this deep module opportunistically.
+repository-policy evaluation, AI routing, and CLI exposure require separate
+phases and contracts. They must not be implemented by extending this deep
+module opportunistically.
