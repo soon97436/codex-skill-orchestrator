@@ -397,7 +397,7 @@ def _validate_capabilities(document: Mapping[str, Any], skill_id: str) -> None:
         raise ValidationError(f"{label} process mode and commands are inconsistent")
 
 
-def validate_registry(project_root: Path) -> Dict[str, Any]:
+def validate_registry_snapshot(project_root: Path) -> Dict[str, Any]:
     registry = load_json(project_root / "registry" / "skills.json")
     _expect_exact_keys(registry, {"schema_version", "skills"}, "registry")
     if registry["schema_version"] != 1 or not isinstance(registry["skills"], list):
@@ -498,7 +498,17 @@ def validate_registry(project_root: Path) -> Dict[str, Any]:
             raise IntegrityError(f"checksum index mismatch for {bundle_key}")
         validated[skill_id] = copy.deepcopy(entry)
 
-    return validated
+    return {
+        "schema_version": 1,
+        "registry": copy.deepcopy(validated),
+        "policy": copy.deepcopy(allowlist),
+    }
+
+
+def validate_registry(project_root: Path) -> Dict[str, Any]:
+    """Validate the registry and return its existing public mapping."""
+
+    return validate_registry_snapshot(project_root)["registry"]
 
 
 def validate_project(project_root: Path) -> Dict[str, Any]:
