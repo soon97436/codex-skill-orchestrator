@@ -10,6 +10,7 @@ from unittest import mock
 from skill_orchestrator import engine
 from skill_orchestrator.engine import apply_profile, audit, rollback
 from skill_orchestrator.errors import IntegrityError, OperationError
+from skill_orchestrator.validation import canonical_json
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -30,6 +31,32 @@ def detailed_snapshot(root: Path):
 
 
 class EngineTests(unittest.TestCase):
+    def test_python39_write_text_compatibility_preserves_canonical_json(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="cso python39 write text ") as temporary:
+            base = Path(temporary)
+            install_root = base / "state"
+            skills_dir = base / "skills"
+
+            real_write_text = Path.write_text
+
+            def python39_write_text(self, data, encoding=None, errors=None):
+                return real_write_text(self, data, encoding=encoding, errors=errors)
+
+            with mock.patch.object(Path, "write_text", python39_write_text):
+                apply_profile("universal", install_root, skills_dir, source_root=ROOT)
+
+            json_paths = [
+                skills_dir / "codex-skill-orchestrator" / "references" / "active-profile.json",
+                install_root / "state" / "state.json",
+            ]
+            for path in json_paths:
+                actual_bytes = path.read_bytes()
+                self.assertNotIn(b"\xef\xbb\xbf", actual_bytes)
+                self.assertNotIn(b"\r", actual_bytes)
+                self.assertTrue(actual_bytes.endswith(b"\n"))
+                parsed = json.loads(actual_bytes.decode("utf-8"))
+                self.assertEqual(actual_bytes, canonical_json(parsed).encode("utf-8"))
+
     def test_dry_run_has_zero_persistent_writes(self) -> None:
         with tempfile.TemporaryDirectory(prefix="cso dry run ") as temporary:
             base = Path(temporary)
