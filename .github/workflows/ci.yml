@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cross-platform:
+    name: ${{ matrix.os }} / Python ${{ matrix.python-version }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+          - windows-latest
+        python-version:
+          - "3.9"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Runtime evidence
+        run: |
+          python --version
+          python -c "print('runner.os=${{ runner.os }}')"
+
+      - name: Python 3.9 grammar
+        run: >-
+          python -c "import pathlib, subprocess; raw = subprocess.run(['git', 'ls-files', '-z', '*.py'], check=True, capture_output=True).stdout; files = [item.decode('utf-8') for item in raw.split(b'\0') if item]; [compile(pathlib.Path(path).read_text(encoding='utf-8'), path, 'exec', dont_inherit=True) for path in files]; print(f'Python 3.9 grammar: PASS, {len(files)} files')"
+
+      - name: Phase 5A focused tests
+        run: python -m unittest discover -s tests -p "test_registry_trust.py" -v
+
+      - name: Full unit suite
+        run: python -m unittest discover -s tests -v
+
+      - name: Release audit
+        run: python scripts/release_audit.py
+
+      - name: Native POSIX smoke
+        if: matrix.os != 'windows-latest'
+        shell: bash
+        run: sh scripts/smoke.sh
+
+      - name: Native Windows smoke
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: ./scripts/smoke.ps1
