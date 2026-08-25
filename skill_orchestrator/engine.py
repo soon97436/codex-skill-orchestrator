@@ -152,7 +152,8 @@ def _write_json_atomic(path: Path, document: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(f".{path.name}.tmp-{secrets.token_hex(4)}")
     try:
-        temporary.write_text(canonical_json(document), encoding="utf-8", newline="\n")
+        with temporary.open("w", encoding="utf-8", newline="\n") as handle:
+            handle.write(canonical_json(document))
         os.replace(temporary, path)
     finally:
         if temporary.exists():
@@ -314,7 +315,8 @@ def _build_skill_stage(
         shutil.copy2(source_file, destination, follow_symlinks=False)
     active_profile = stage / "references" / "active-profile.json"
     active_profile.parent.mkdir(parents=True, exist_ok=True)
-    active_profile.write_text(canonical_json(_active_profile_document(profile)), encoding="utf-8", newline="\n")
+    with active_profile.open("w", encoding="utf-8", newline="\n") as handle:
+        handle.write(canonical_json(_active_profile_document(profile)))
     return tree_manifest(stage)
 
 
