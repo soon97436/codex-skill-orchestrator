@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "default_profile": "first-party-bundled",
+  "profiles": [
+    {
+      "id": "first-party-bundled",
+      "source_policy": {
+        "allowed_source_types": [
+          "bundled"
+        ]
+      },
+      "provenance_policy": {
+        "allowed_classes": [
+          "first-party"
+        ]
+      },
+      "license_policy": {
+        "allowed_spdx_licenses": [
+          "MIT",
+          "Apache-2.0",
+          "BSD-2-Clause",
+          "BSD-3-Clause",
+          "ISC"
+        ]
+      }
+    }
+  ]
+}
