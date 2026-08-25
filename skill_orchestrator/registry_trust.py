@@ -24,6 +24,7 @@ ADMISSION_REASON_IDS = {
     "unknown": "trust.admission.unknown",
 }
 SUPPORTED_SOURCE_TYPES = ("bundled", "git")
+SUPPORTED_PROVENANCE_CLASSES = ("first-party", "third-party")
 EVIDENCE_FIELDS = (
     "registry_valid",
     "source_revision_immutable",
@@ -48,6 +49,7 @@ TRUST_REASON_IDS = (
     "trust.provenance.complete",
     "trust.provenance.incomplete",
     "trust.provenance.unknown",
+    "trust.provenance.class-disallowed",
     "trust.license.approved",
     "trust.license.rejected",
     "trust.integrity.verified",
@@ -98,7 +100,9 @@ def _require_strings(value: Any, label: str) -> Tuple[str, ...]:
     return tuple(result)
 
 
-def _validate_entry(entry: Mapping[str, Any]) -> Tuple[str, str, Any, str, bool]:
+def _validate_entry(
+    entry: Mapping[str, Any],
+) -> Tuple[str, str, Any, str, bool, Optional[str]]:
     skill_id = _required(entry, "id", "entry")
     if type(skill_id) is not str or not _IDENTIFIER_RE.fullmatch(skill_id):
         raise ValueError("entry id is not a normalized identifier")
@@ -125,10 +129,20 @@ def _validate_entry(entry: Mapping[str, Any]) -> Tuple[str, str, Any, str, bool]
         _required(license_info, "redistribution", "entry license"),
         "entry license redistribution",
     )
-    return skill_id, source_type, revision, spdx, redistribution
+    provenance_class: Optional[str] = None
+    if "provenance" in entry:
+        provenance = _require_mapping(entry["provenance"], "entry provenance")
+        if set(provenance) != {"class"}:
+            raise ValueError("entry provenance must contain only class")
+        provenance_class = provenance["class"]
+        if provenance_class not in SUPPORTED_PROVENANCE_CLASSES:
+            raise ValueError("entry provenance class is unsupported")
+    return skill_id, source_type, revision, spdx, redistribution, provenance_class
 
 
-def _validate_policy(policy: Mapping[str, Any]) -> Tuple[Tuple[str, ...], Tuple[str, ...], bool, bool]:
+def _validate_policy(
+    policy: Mapping[str, Any],
+) -> Tuple[Tuple[str, ...], Tuple[str, ...], bool, bool, Optional[Tuple[str, ...]]]:
     allowed_source_types = _require_strings(
         _required(policy, "allowed_source_types", "policy"),
         "policy allowed_source_types",
@@ -147,11 +161,25 @@ def _validate_policy(policy: Mapping[str, Any]) -> Tuple[Tuple[str, ...], Tuple[
         _required(policy, "require_immutable_revision_for_remote", "policy"),
         "policy require_immutable_revision_for_remote",
     )
+    allowed_provenance_classes: Optional[Tuple[str, ...]] = None
+    if "allowed_provenance_classes" in policy:
+        allowed_provenance_classes = _require_strings(
+            policy["allowed_provenance_classes"],
+            "policy allowed_provenance_classes",
+        )
+        if any(
+            provenance_class not in SUPPORTED_PROVENANCE_CLASSES
+            for provenance_class in allowed_provenance_classes
+        ):
+            raise ValueError("policy allowed_provenance_classes contains an unsupported value")
+        if len(set(allowed_provenance_classes)) != len(allowed_provenance_classes):
+            raise ValueError("policy allowed_provenance_classes contains duplicates")
     return (
         allowed_source_types,
         allowed_spdx_licenses,
         require_checksums,
         require_immutable_revision,
+        allowed_provenance_classes,
     )
 
 
@@ -211,14 +239,32 @@ def evaluate_registry_trust(
     if not isinstance(evidence, Mapping):
         raise TypeError("evidence must be an object")
 
-    skill_id, source_type, _revision, spdx, redistribution = _validate_entry(entry)
+    (
+        skill_id,
+        source_type,
+        _revision,
+        spdx,
+        redistribution,
+        provenance_class,
+    ) = _validate_entry(entry)
     (
         allowed_source_types,
         allowed_spdx_licenses,
         require_checksums,
         require_immutable_revision,
+        allowed_provenance_classes,
     ) = _validate_policy(policy)
     facts = _validate_evidence(evidence)
+
+    profile_provenance_mode = (provenance_class is not None) or (
+        allowed_provenance_classes is not None
+    )
+    if profile_provenance_mode and (
+        provenance_class is None or allowed_provenance_classes is None
+    ):
+        raise ValueError(
+            "profile-aware provenance fields must be supplied together"
+        )
 
     decisions: List[Dict[str, Any]] = []
     registry_valid = facts["registry_valid"]
@@ -283,9 +329,18 @@ def evaluate_registry_trust(
 
     provenance_complete = facts["provenance_complete"]
     if provenance_complete is True:
-        decisions.append(
-            _decision("provenance", "pass", "trust.provenance.complete")
-        )
+        if profile_provenance_mode and provenance_class not in allowed_provenance_classes:
+            decisions.append(
+                _decision(
+                    "provenance",
+                    "fail",
+                    "trust.provenance.class-disallowed",
+                )
+            )
+        else:
+            decisions.append(
+                _decision("provenance", "pass", "trust.provenance.complete")
+            )
     elif provenance_complete is False:
         decisions.append(
             _decision("provenance", "fail", "trust.provenance.incomplete")

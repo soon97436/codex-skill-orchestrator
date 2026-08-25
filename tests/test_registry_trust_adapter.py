@@ -9,7 +9,11 @@ from unittest.mock import patch
 from skill_orchestrator import registry_trust_adapter
 from skill_orchestrator.errors import IntegrityError, SecurityError, ValidationError
 from skill_orchestrator.registry_trust import TRUST_DIMENSIONS
-from skill_orchestrator.validation import validate_registry, validate_registry_snapshot
+from skill_orchestrator.validation import (
+    validate_registry,
+    validate_registry_snapshot,
+    validate_registry_trust_snapshot,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -28,6 +32,7 @@ class RegistryTrustAdapterTests(unittest.TestCase):
         self.assertEqual(result["schema_version"], 1)
         self.assertFalse(result["truncated"])
         self.assertEqual(len(result["skills"]), 1)
+        self.assertEqual(result["trust_profile_id"], "first-party-bundled")
         self.assertEqual(result["skills"][0]["skill_id"], "codex-skill-orchestrator")
         self.assertEqual(result["skills"][0]["status"], "admissible")
 
@@ -79,6 +84,10 @@ class RegistryTrustAdapterTests(unittest.TestCase):
         self.assertEqual(snapshot["policy"]["allowed_source_types"], ["bundled"])
         self.assertTrue(snapshot["policy"]["require_checksums"])
         self.assertTrue(snapshot["policy"]["require_immutable_revision_for_remote"])
+
+    def test_trust_snapshot_contains_validated_profile(self) -> None:
+        snapshot = validate_registry_trust_snapshot(ROOT)
+        self.assertEqual(snapshot["trust_profiles"]["default_profile"], "first-party-bundled")
 
     def test_tampered_bundled_file_still_raises_integrity_error(self) -> None:
         with tempfile.TemporaryDirectory(prefix="cso-registry-") as temporary:
@@ -146,12 +155,12 @@ class RegistryTrustAdapterTests(unittest.TestCase):
                 registry_trust_adapter.evaluate_project_registry_trust(fixture)
 
     def test_adapter_does_not_mutate_snapshot_structures(self) -> None:
-        snapshot = validate_registry_snapshot(ROOT)
+        snapshot = validate_registry_trust_snapshot(ROOT)
         before = copy.deepcopy(snapshot)
 
         with patch.object(
             registry_trust_adapter,
-            "validate_registry_snapshot",
+            "validate_registry_trust_snapshot",
             return_value=snapshot,
         ):
             registry_trust_adapter.evaluate_project_registry_trust(ROOT)
@@ -170,16 +179,54 @@ class RegistryTrustAdapterTests(unittest.TestCase):
         )
 
     def test_adapter_does_not_coerce_unsupported_policy_values(self) -> None:
-        snapshot = validate_registry_snapshot(ROOT)
-        snapshot["policy"]["allowed_source_types"] = ["archive"]
+        snapshot = validate_registry_trust_snapshot(ROOT)
+        snapshot["operational_policy"]["allowed_source_types"] = ["archive"]
 
         with patch.object(
             registry_trust_adapter,
-            "validate_registry_snapshot",
+            "validate_registry_trust_snapshot",
             return_value=snapshot,
         ):
-            with self.assertRaises(ValueError):
+            with self.assertRaises(ValidationError):
                 registry_trust_adapter.evaluate_project_registry_trust(ROOT)
+
+    def test_explicit_default_profile_selection_is_deterministic(self) -> None:
+        first = registry_trust_adapter.evaluate_project_registry_trust(
+            ROOT, profile_id="first-party-bundled"
+        )
+        second = registry_trust_adapter.evaluate_project_registry_trust(
+            ROOT, profile_id="first-party-bundled"
+        )
+        self.assertEqual(first, second)
+
+    def test_unknown_profile_fails_without_fallback(self) -> None:
+        with self.assertRaises(ValidationError):
+            registry_trust_adapter.evaluate_project_registry_trust(ROOT, profile_id="missing")
+
+    def test_adapter_uses_snapshot_without_independent_file_reads(self) -> None:
+        snapshot = validate_registry_trust_snapshot(ROOT)
+        with patch.object(
+            registry_trust_adapter,
+            "validate_registry_trust_snapshot",
+            return_value=snapshot,
+        ):
+            result = registry_trust_adapter.evaluate_project_registry_trust(Path("/does/not/exist"))
+        self.assertEqual(result["trust_profile_id"], "first-party-bundled")
+
+    def test_profile_disallows_validated_third_party_class(self) -> None:
+        snapshot = copy.deepcopy(validate_registry_trust_snapshot(ROOT))
+        entry = snapshot["registry"]["codex-skill-orchestrator"]
+        entry["provenance"]["third_party"] = True
+        with patch.object(
+            registry_trust_adapter,
+            "validate_registry_trust_snapshot",
+            return_value=snapshot,
+        ):
+            result = registry_trust_adapter.evaluate_project_registry_trust(ROOT)
+        provenance = result["skills"][0]["decisions"][3]
+        self.assertEqual(provenance["status"], "fail")
+        self.assertEqual(provenance["reason_ids"], ["trust.provenance.class-disallowed"])
+        self.assertNotIn("trust.provenance.incomplete", result["skills"][0]["reasons"])
 
 
 if __name__ == "__main__":

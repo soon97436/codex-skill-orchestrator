@@ -511,6 +511,25 @@ def validate_registry(project_root: Path) -> Dict[str, Any]:
     return validate_registry_snapshot(project_root)["registry"]
 
 
+def validate_registry_trust_snapshot(project_root: Path) -> Dict[str, Any]:
+    """Validate registry evidence and the separate trust-profile document."""
+
+    snapshot = validate_registry_snapshot(project_root)
+    trust_profiles = load_json(project_root / "security" / "trust_profiles.json")
+    from .registry_trust_policy import validate_trust_profile_document
+
+    validated_profiles = validate_trust_profile_document(
+        trust_profiles,
+        snapshot["policy"],
+    )
+    return {
+        "schema_version": 1,
+        "registry": copy.deepcopy(snapshot["registry"]),
+        "operational_policy": copy.deepcopy(snapshot["policy"]),
+        "trust_profiles": validated_profiles,
+    }
+
+
 def validate_project(project_root: Path) -> Dict[str, Any]:
     profiles = load_profiles(project_root)
     registry = validate_registry(project_root)
