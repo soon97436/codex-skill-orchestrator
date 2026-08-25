@@ -21,6 +21,10 @@ BASE_POLICY = {
     "require_checksums": True,
     "require_immutable_revision_for_remote": True,
 }
+PROFILE_POLICY = {
+    **BASE_POLICY,
+    "allowed_provenance_classes": ["first-party"],
+}
 BASE_EVIDENCE = {
     "registry_valid": True,
     "source_revision_immutable": None,
@@ -34,6 +38,17 @@ def evaluate(entry=None, policy=None, evidence=None):
         copy.deepcopy(BASE_ENTRY if entry is None else entry),
         policy=copy.deepcopy(BASE_POLICY if policy is None else policy),
         evidence=copy.deepcopy(BASE_EVIDENCE if evidence is None else evidence),
+    )
+
+
+def evaluate_profile(entry=None, policy=None, evidence=None):
+    entry_value = copy.deepcopy(BASE_ENTRY if entry is None else entry)
+    policy_value = copy.deepcopy(PROFILE_POLICY if policy is None else policy)
+    evidence_value = copy.deepcopy(BASE_EVIDENCE if evidence is None else evidence)
+    return evaluate_registry_trust(
+        entry_value,
+        policy=policy_value,
+        evidence=evidence_value,
     )
 
 
@@ -229,6 +244,67 @@ class RegistryTrustTests(unittest.TestCase):
         self.assertTrue(
             all(decision["status"] in DECISION_STATUSES for decision in result["decisions"])
         )
+
+    def test_legacy_result_has_no_profile_provenance_effect(self):
+        result = evaluate()
+        self.assertEqual(result["decisions"][3]["reason_ids"], ["trust.provenance.complete"])
+        self.assertNotIn("trust.provenance.class-disallowed", result["reasons"])
+
+    def test_profile_aware_first_party_complete_provenance_passes(self):
+        entry = {**BASE_ENTRY, "provenance": {"class": "first-party"}}
+        result = evaluate_profile(entry)
+        self.assertEqual(result["decisions"][3]["status"], "pass")
+        self.assertEqual(result["decisions"][3]["reason_ids"], ["trust.provenance.complete"])
+        self.assertEqual(result["status"], "admissible")
+
+    def test_profile_aware_third_party_disallowed_is_not_incomplete(self):
+        entry = {**BASE_ENTRY, "provenance": {"class": "third-party"}}
+        result = evaluate_profile(entry)
+        provenance = result["decisions"][3]
+        self.assertEqual(provenance["status"], "fail")
+        self.assertEqual(provenance["reason_ids"], ["trust.provenance.class-disallowed"])
+        self.assertNotIn("trust.provenance.incomplete", result["reasons"])
+        self.assertEqual(result["status"], "rejected")
+
+    def test_profile_aware_allowed_third_party_passes(self):
+        entry = {**BASE_ENTRY, "provenance": {"class": "third-party"}}
+        policy = {**PROFILE_POLICY, "allowed_provenance_classes": ["first-party", "third-party"]}
+        result = evaluate_profile(entry, policy=policy)
+        self.assertEqual(result["decisions"][3]["status"], "pass")
+
+    def test_profile_aware_incomplete_provenance_keeps_existing_reason(self):
+        entry = {**BASE_ENTRY, "provenance": {"class": "third-party"}}
+        result = evaluate_profile(
+            entry=entry,
+            evidence={**BASE_EVIDENCE, "provenance_complete": False},
+        )
+        self.assertEqual(
+            result["decisions"][3]["reason_ids"],
+            ["trust.provenance.incomplete"],
+        )
+
+    def test_profile_aware_unknown_provenance_keeps_existing_reason(self):
+        entry = {**BASE_ENTRY, "provenance": {"class": "third-party"}}
+        result = evaluate_profile(
+            entry=entry,
+            evidence={**BASE_EVIDENCE, "provenance_complete": None},
+        )
+        self.assertEqual(
+            result["decisions"][3]["reason_ids"],
+            ["trust.provenance.unknown"],
+        )
+
+    def test_profile_fields_must_be_present_on_both_sides(self):
+        entry = {**BASE_ENTRY, "provenance": {"class": "first-party"}}
+        with self.assertRaises(ValueError):
+            evaluate(entry=entry)
+        with self.assertRaises(ValueError):
+            evaluate_profile(entry=BASE_ENTRY, policy=PROFILE_POLICY)
+
+    def test_profile_provenance_class_is_closed(self):
+        entry = {**BASE_ENTRY, "provenance": {"class": "community"}}
+        with self.assertRaises(ValueError):
+            evaluate_profile(entry=entry)
 
 
 if __name__ == "__main__":
