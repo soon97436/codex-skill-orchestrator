@@ -198,6 +198,88 @@ Increment 2 leaves `recommendations.py`, the capability-policy evaluator,
 registry/trust evaluators, installer, CLI, and all Phase 3/4/7 contracts
 unchanged. Runtime enforcement remains not implemented.
 
+## Increment 3 — Installation authorization boundary
+
+Increment 3 adds a pure, metadata-only seam for deciding whether a trusted
+caller may proceed to a future installation or activation execution boundary.
+It deliberately separates the CSO management plane from the installed skill's
+runtime capability plane:
+
+```text
+skill runtime capability
+  != installer management-plane authority
+recommendable
+  != installation authorized
+installation authorized
+  != installation executed
+```
+
+The public interface is:
+
+```python
+evaluate_installation_authorization(
+    *,
+    operation: str,                  # install | activate
+    operator_authorization: str,     # granted | denied | not-provided
+    recommendation_decision: Mapping[str, Any],
+) -> dict
+```
+
+The seam consumes a structurally validated Increment 2 recommendation result;
+it does not call the recommendation evaluator, load a registry or policy, or
+obtain consent. `operator_authorization="granted"` means only that a trusted
+caller asserts explicit authorization was obtained through its own interaction
+boundary. This seam does not verify identity, authentication, session state,
+freshness, person identity, or device identity.
+
+Only `install` and `activate` operations are in scope. The closed result status
+vocabulary is:
+
+```text
+authorized | rejected | unknown | invalid
+```
+
+Malformed operation, operator state, or recommendation evidence is `invalid`.
+Rejected recommendations remain `rejected`; unknown recommendations remain
+`unknown`. A `recommendable` recommendation is `rejected` when operator
+authorization is denied, `unknown` when authorization is not provided, and
+`authorized` only when authorization is explicitly granted.
+
+Capability `not-requested` remains distinct from runtime permission. A
+recommendable result with no requested runtime capabilities may therefore be
+authorized for the management-plane operation, while retaining the fixed
+limitation `installation.limit.skill-capability-not-requested` and always
+stating that runtime capability authorization was not granted.
+
+Every result carries fixed limitations that make the execution boundary
+explicit:
+
+```text
+installation.limit.execution-not-performed
+installation.limit.destination-validation-not-performed
+installation.limit.os-permission-not-granted
+installation.limit.runtime-capability-not-authorized
+```
+
+Activation additionally carries
+`installation.limit.activation-not-performed`. The seam never calls
+`plan_install`, `apply_profile`, activation, rollback, or any execution-plane
+operation. Destination/root validation, transaction safety, atomic replacement,
+rollback, and state mutation remain in the existing execution layer and are
+not claimed here. No operating-system permission is granted by this API.
+
+Reason identifiers are fixed and ordered from structural input, through the
+recommendation and operator decisions, to the overall authorization result.
+No fallback, inferred consent, silent upgrade, or coercion is allowed. The
+result never emits skill/candidate IDs, profile names, task or command text,
+paths, URLs, secrets, tokens, hashes, publisher data, user/host/environment
+metadata, timestamps, transaction IDs, or exception strings.
+
+Increment 3 does not modify `engine.py`, `cli.py`, `recommendations.py`, the
+Increment 1/2 evaluators, registry or security data, installer launchers, or
+any Phase 3/4/7 contract. It adds no runtime enforcement, remote fetching, or
+activation execution; it only prepares a future integration seam.
+
 ## Compatibility
 
 The Phase 5A canonical probe, Phase 5C trust-profile semantics, registry
