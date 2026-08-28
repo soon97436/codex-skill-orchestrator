@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "operational_floor": {
+    "schema_version": 1,
+    "filesystem": {
+      "read": ["project"],
+      "write": []
+    },
+    "network": {
+      "mode": "none"
+    },
+    "process": {
+      "mode": "none",
+      "commands": []
+    }
+  },
+  "default_profile": "local-safe",
+  "profiles": [
+    {
+      "id": "local-safe",
+      "capabilities": {
+        "schema_version": 1,
+        "filesystem": {
+          "read": ["project"],
+          "write": []
+        },
+        "network": {
+          "mode": "none"
+        },
+        "process": {
+          "mode": "none",
+          "commands": []
+        }
+      }
+    }
+  ]
+}
