@@ -130,6 +130,74 @@ Increment 1 does not add recommendation filtering, installer enforcement, CLI
 integration, remote fetching, dependency resolution, shell execution, runtime
 sandboxing, or L2–L5 execution.
 
+## Increment 2 — Recommendation admission seam
+
+Increment 2 adds a pure seam for composing already-normalized upstream
+decisions. It does not change the recommendation engine or install/runtime
+paths. The intended decision pipeline is:
+
+```text
+candidate
+  → registry membership
+  → trust admission
+  → capability admission
+  → recommendation admission
+```
+
+The public interface is:
+
+```python
+evaluate_recommendation_admission(
+    *,
+    registry_membership: bool,
+    trust_status: str,
+    capability_decision: Mapping[str, Any],
+) -> dict
+```
+
+It consumes only a boolean registry-membership fact, a normalized trust state,
+and the content-free result of `evaluate_capability_policy`. It performs no
+registry loading, policy loading, recommendation filtering, installation, or
+activation.
+
+The closed recommendation status vocabulary is:
+
+```text
+recommendable | rejected | unknown | invalid
+```
+
+Registry absence and explicit trust or capability rejection are `rejected`.
+Unknown or not-yet-evaluated trust, and unknown capability evidence, remain
+`unknown`. Malformed upstream evidence, unsupported input types, schema
+mismatches, and trust-status mismatches are `invalid`. Only registry membership
+plus admissible trust plus independently admissible capability evidence is
+`recommendable`.
+
+An empty capability request may still be `recommendable` when trust and
+registry checks pass, but the result explicitly carries these limitations:
+
+```text
+recommendation.limit.capability-authorization-not-granted
+recommendation.limit.installation-not-authorized
+recommendation.limit.runtime-capability-not-authorized
+```
+
+Thus `recommendable` is not capability authorization, installation
+authorization, or runtime authorization. No fallback, coercion, silent
+intersection, or upgrade from unknown evidence is permitted. Per-capability
+metadata remains in the fixed family order and contains only allowlisted
+status/reason identifiers.
+
+The seam is metadata-only and preserves the privacy boundary: it never emits
+candidate identifiers, task text, commands, paths, URLs, secrets, tokens,
+hashes, publisher text, usernames, hostnames, environment values, timestamps,
+or exception strings. It has no filesystem, subprocess, shell, network,
+environment, Git/GitHub, LLM, or installer dependency.
+
+Increment 2 leaves `recommendations.py`, the capability-policy evaluator,
+registry/trust evaluators, installer, CLI, and all Phase 3/4/7 contracts
+unchanged. Runtime enforcement remains not implemented.
+
 ## Compatibility
 
 The Phase 5A canonical probe, Phase 5C trust-profile semantics, registry
