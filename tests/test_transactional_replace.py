@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import copy
 import pickle
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -30,6 +31,7 @@ class _TargetAppearsOnFinalCheck:
         return next(self._states)
 
 
+@unittest.skipIf(sys.platform == "win32", "POSIX target-bound staging tests")
 class TargetBoundStageTests(unittest.TestCase):
     def _request(self, base: Path, *, target_key: str = "safe-skill") -> TargetStageRequest:
         source = base / "source"
@@ -176,6 +178,50 @@ class TargetBoundStageTests(unittest.TestCase):
             self.assertTrue(namespace.is_dir())
             self.assertFalse((request.skills_root / request.target_key).exists())
             self.assertEqual(outcome.lease.cleanup().status, "cleaned")
+
+
+@unittest.skipUnless(sys.platform == "win32", "Windows target-bound fail-closed tests")
+class WindowsTargetBoundFailClosedTests(unittest.TestCase):
+    def test_real_windows_target_bound_stage_rejects_before_any_mutation(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary).resolve()
+            source = base / "source"
+            skills = base / "skills"
+            source.mkdir(mode=0o700)
+            skills.mkdir(mode=0o700)
+            payload = b"safe declared bytes\n"
+            (source / "SKILL.md").write_bytes(payload)
+            request = TargetStageRequest(
+                skills_root=skills,
+                target_key="safe-skill",
+                source_root=source,
+                declared_files=(
+                    DeclaredFile("SKILL.md", hashlib.sha256(payload).hexdigest()),
+                ),
+                limits=ExecutionLimits(),
+            )
+            source_before = (source / "SKILL.md").read_bytes()
+
+            outcome = prepare_target_bound_stage(request)
+
+            self.assertEqual(outcome.result.status, "rejected")
+            self.assertEqual(
+                outcome.result.reason_ids,
+                ("phase5e.replace.platform.unsupported",),
+            )
+            self.assertIsNone(outcome.lease)
+            self.assertFalse((skills / ".cso-staging").exists())
+            self.assertFalse((skills / request.target_key).exists())
+            self.assertEqual((source / "SKILL.md").read_bytes(), source_before)
+            public = repr(outcome)
+            for secret in (
+                str(skills),
+                str(source),
+                request.target_key,
+                hashlib.sha256(payload).hexdigest(),
+                payload.hex(),
+            ):
+                self.assertNotIn(secret, public)
 
 
 if __name__ == "__main__":
