@@ -101,6 +101,95 @@ class StageResult:
 
 
 @dataclass(frozen=True)
+class StageLeaseOutcome:
+    """A metadata result plus an optional live, module-owned stage lease."""
+
+    result: StageResult
+    lease: Optional["OwnedStageLease"]
+
+
+@dataclass(frozen=True)
+class LeaseCleanupResult:
+    status: str
+
+
+class OwnedStageLease:
+    """Non-serializable, single-owner capability for one verified stage."""
+
+    def __init__(
+        self,
+        adapter: "FilesystemAdapter",
+        roots: "_RootHandles",
+        stage: "_StageHandle",
+        expected: Dict[str, Tuple[str, int]],
+        limits: ExecutionLimits,
+        manifest_digest: str,
+        total_bytes: int,
+    ) -> None:
+        self.__adapter = adapter
+        self.__roots = roots
+        self.__stage = stage
+        self.__expected = dict(expected)
+        self.__limits = limits
+        self.__manifest_digest = manifest_digest
+        self.__total_bytes = total_bytes
+        self.__state = "active"
+
+    def __repr__(self) -> str:
+        return "OwnedStageLease(state=%r)" % self.__state
+
+    def __reduce__(self):
+        raise TypeError("owned stage leases are not serializable")
+
+    def __reduce_ex__(self, protocol: int):
+        raise TypeError("owned stage leases are not serializable")
+
+    def __copy__(self):
+        raise TypeError("owned stage leases are single-owner")
+
+    def __deepcopy__(self, memo):
+        raise TypeError("owned stage leases are single-owner")
+
+    def _active(self) -> bool:
+        return self.__state == "active"
+
+    def _matches_parent(self, device: int, inode: int) -> bool:
+        if not self._active():
+            return False
+        try:
+            parent = os.fstat(self.__roots.staging_parent_fd)
+            return (parent.st_dev, parent.st_ino) == (device, inode)
+        except OSError:
+            return False
+
+    def _revalidate(self) -> bool:
+        if not self._active():
+            return False
+        try:
+            records = self.__adapter.verify_stage(self.__stage, self.__expected, self.__limits)
+            return (
+                _manifest_digest(records) == self.__manifest_digest
+                and sum(size for _, _, size in records) == self.__total_bytes
+            )
+        except Exception:
+            return False
+
+    def cleanup(self) -> LeaseCleanupResult:
+        if self.__state == "cleaned":
+            return LeaseCleanupResult("cleaned")
+        if self.__state != "active":
+            return LeaseCleanupResult("cleanup-required")
+        try:
+            self.__adapter.cleanup_stage(self.__stage)
+            self.__adapter.close_roots(self.__roots)
+        except Exception:
+            self.__state = "cleanup-required"
+            return LeaseCleanupResult("cleanup-required")
+        self.__state = "cleaned"
+        return LeaseCleanupResult("cleaned")
+
+
+@dataclass(frozen=True)
 class _FileMetadata:
     device: int
     inode: int
@@ -784,4 +873,142 @@ def stage_declared_candidate(
         failure_status,
         failure_reason,
         file_count=len(declared_files),
+    )
+
+
+def stage_declared_candidate_owned(
+    request: StageRequest,
+    *,
+    fs: Optional[FilesystemAdapter] = None,
+) -> StageLeaseOutcome:
+    """Stage exact declared files while retaining module-owned live identity."""
+
+    try:
+        valid_request, declared_files = _validate_request(request)
+    except Exception:
+        return StageLeaseOutcome(_result("invalid", "phase5e.fs.input.invalid"), None)
+
+    adapter: FilesystemAdapter = fs if fs is not None else RealFilesystemAdapter()
+    if not adapter.secure_staging_supported():
+        windows_unsupported = (
+            isinstance(adapter, RealFilesystemAdapter)
+            and adapter.platform_name == "win32"
+        )
+        return StageLeaseOutcome(
+            _result(
+                "rejected",
+                "phase5e.fs.platform.unsupported",
+                file_count=len(declared_files),
+                windows_unsupported=windows_unsupported,
+            ),
+            None,
+        )
+
+    roots: Optional[_RootHandles] = None
+    stage: Optional[_StageHandle] = None
+    failure_status = "failed"
+    failure_reason = "phase5e.fs.operation.failed"
+    try:
+        roots = adapter.open_roots(valid_request.source_root, valid_request.staging_parent)
+        stage = adapter.create_stage(roots, valid_request.candidate_key)
+        expected: Dict[str, Tuple[str, int]] = {}
+        total = 0
+        for declared in declared_files:
+            source = adapter.open_source_file(roots, declared.relative_path)
+            destination: Optional[_OpenFile] = None
+            digest = hashlib.sha256()
+            copied = 0
+            before = source.metadata
+            try:
+                destination = adapter.create_stage_file(stage, declared.relative_path)
+                while True:
+                    chunk = adapter.read(source, valid_request.limits.copy_chunk_bytes)
+                    if not chunk:
+                        break
+                    copied += len(chunk)
+                    total += len(chunk)
+                    if copied > valid_request.limits.max_single_file_bytes:
+                        failure_status = "rejected"
+                        failure_reason = "phase5e.fs.resource.single-file-limit"
+                        raise _Rejected(failure_reason)
+                    if total > valid_request.limits.max_total_candidate_bytes:
+                        failure_status = "rejected"
+                        failure_reason = "phase5e.fs.resource.total-limit"
+                        raise _Rejected(failure_reason)
+                    digest.update(chunk)
+                    offset = 0
+                    while offset < len(chunk):
+                        written = adapter.write(destination, chunk[offset:])
+                        if type(written) is not int or written <= 0:
+                            raise OSError()
+                        offset += written
+                adapter.flush(destination)
+                if not _source_unchanged(before, adapter.metadata(source), copied):
+                    failure_status = "rejected"
+                    failure_reason = "phase5e.fs.source.changed"
+                    raise _Rejected(failure_reason)
+                actual_digest = digest.hexdigest()
+                if actual_digest != declared.sha256:
+                    failure_status = "rejected"
+                    failure_reason = "phase5e.fs.source.hash-mismatch"
+                    raise _Rejected(failure_reason)
+                expected[declared.relative_path] = (actual_digest, copied)
+            finally:
+                if destination is not None:
+                    adapter.close_file(destination)
+                adapter.close_file(source)
+        verified = adapter.verify_stage(stage, expected, valid_request.limits)
+        digest_value = _manifest_digest(verified)
+        stage_id = stage.stage_id
+        if roots.source_fd >= 0:
+            os.close(roots.source_fd)
+            roots.source_fd = -1
+        lease = OwnedStageLease(
+            adapter, roots, stage, expected, valid_request.limits, digest_value, total
+        )
+        return StageLeaseOutcome(
+            _result(
+                "staged",
+                "phase5e.fs.staged",
+                file_count=len(declared_files),
+                total_bytes=total,
+                manifest_digest=digest_value,
+                stage_id=stage_id,
+            ),
+            lease,
+        )
+    except _Rejected as error:
+        failure_status = "rejected"
+        failure_reason = error.reason_id
+    except _CleanupRequired:
+        failure_status = "cleanup-required"
+        failure_reason = "phase5e.fs.cleanup.required"
+    except Exception:
+        failure_status = "failed"
+        failure_reason = "phase5e.fs.operation.failed"
+    if stage is not None:
+        try:
+            adapter.cleanup_stage(stage)
+        except Exception:
+            failure_status = "cleanup-required"
+            failure_reason = "phase5e.fs.cleanup.required"
+    if roots is not None:
+        try:
+            adapter.close_roots(roots)
+        except Exception:
+            failure_status = "cleanup-required"
+            failure_reason = "phase5e.fs.cleanup.required"
+    return StageLeaseOutcome(_result(failure_status, failure_reason, file_count=len(declared_files)), None)
+
+
+def revalidate_owned_stage(lease: object) -> bool:
+    return type(lease) is OwnedStageLease and lease._revalidate()
+
+
+def owned_stage_matches_parent(lease: object, device: int, inode: int) -> bool:
+    return (
+        type(lease) is OwnedStageLease
+        and type(device) is int
+        and type(inode) is int
+        and lease._matches_parent(device, inode)
     )
