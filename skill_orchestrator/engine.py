@@ -9,13 +9,13 @@ import secrets
 import shutil
 import sys
 import tempfile
-from contextlib import AbstractContextManager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional
 
 from . import __version__
 from .errors import IntegrityError, OperationError, SecurityError, ValidationError
+from .mutation_lock import MutationLockSet
 from .validation import (
     canonical_json,
     is_reparse_point,
@@ -158,72 +158,6 @@ def _write_json_atomic(path: Path, document: Any) -> None:
     finally:
         if temporary.exists():
             temporary.unlink()
-
-
-class MutationLock(AbstractContextManager):
-    def __init__(self, install_root: Path) -> None:
-        self.path = install_root / "state" / "mutation.lock"
-        self.fd: Optional[int] = None
-        self.token = secrets.token_hex(16)
-
-    def __enter__(self) -> "MutationLock":
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.fd = os.open(str(self.path), os.O_CREAT | os.O_RDWR, 0o600)
-        try:
-            if os.fstat(self.fd).st_size == 0:
-                os.write(self.fd, b"\0")
-            os.lseek(self.fd, 0, os.SEEK_SET)
-            if os.name == "nt":
-                import msvcrt
-
-                msvcrt.locking(self.fd, msvcrt.LK_NBLCK, 1)
-            else:
-                import fcntl
-
-                fcntl.flock(self.fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError as exc:
-            os.close(self.fd)
-            self.fd = None
-            raise OperationError("another orchestrator mutation is in progress") from exc
-        try:
-            payload = json.dumps({"pid": os.getpid(), "token": self.token}, separators=(",", ":")).encode("ascii")
-            os.ftruncate(self.fd, 0)
-            os.lseek(self.fd, 0, os.SEEK_SET)
-            os.write(self.fd, payload)
-            os.fsync(self.fd)
-        except OSError as exc:
-            self._release()
-            raise OperationError("could not initialize the orchestrator mutation lock") from exc
-        return self
-
-    def _release(self) -> None:
-        if self.fd is None:
-            return
-        fd = self.fd
-        self.fd = None
-        try:
-            try:
-                os.lseek(fd, 0, os.SEEK_SET)
-                if os.name == "nt":
-                    import msvcrt
-
-                    msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
-                else:
-                    import fcntl
-
-                    fcntl.flock(fd, fcntl.LOCK_UN)
-            except OSError:
-                # Closing the descriptor also releases the OS lock. Do not turn
-                # a committed mutation into a reported failure during cleanup.
-                pass
-        finally:
-            try:
-                os.close(fd)
-            except OSError:
-                pass
-
-    def __exit__(self, exc_type: Any, exc: Any, traceback: Any) -> None:
-        self._release()
 
 
 def _transaction_id() -> str:
@@ -804,7 +738,7 @@ def apply_profile(
     registry_entry = project["registry"][ROUTER_SKILL_ID]
     roots["install"].mkdir(parents=True, exist_ok=True)
     roots["skills"].mkdir(parents=True, exist_ok=True)
-    with MutationLock(roots["install"]):
+    with MutationLockSet.for_engine(roots["install"], roots["skills"]):
         _recover_preparing_transactions(roots["install"], roots["skills"])
         _recover_rolling_back_transactions(roots["install"], roots["skills"])
         previous_state = _load_state(roots["install"])
@@ -1011,7 +945,7 @@ def rollback(
         return make_result(transaction_id, components)
 
     roots["install"].mkdir(parents=True, exist_ok=True)
-    with MutationLock(roots["install"]):
+    with MutationLockSet.for_engine(roots["install"], roots["skills"]):
         _recover_preparing_transactions(roots["install"], roots["skills"])
         recovered_rollbacks = _recover_rolling_back_transactions(roots["install"], roots["skills"])
         if recovered_rollbacks:

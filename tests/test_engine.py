@@ -1,15 +1,18 @@
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
 
 from skill_orchestrator import engine
 from skill_orchestrator.engine import apply_profile, audit, rollback
-from skill_orchestrator.errors import IntegrityError, OperationError
+from skill_orchestrator.errors import IntegrityError, OperationError, SecurityError
+from skill_orchestrator.mutation_lock import MutationLockSet
 from skill_orchestrator.validation import canonical_json
 
 
@@ -92,6 +95,8 @@ class EngineTests(unittest.TestCase):
             self.assertTrue((install_root / "app" / "bin" / "cso.py").is_file())
             self.assertTrue((install_root / "app" / "bin" / "python-discovery.ps1").is_file())
             self.assertTrue((install_root / "app" / "schemas" / "cso-config.schema.json").is_file())
+            self.assertTrue((install_root / "state" / "mutation.lock").is_file())
+            self.assertTrue((skills_dir / ".cso-state" / "mutation.lock").is_file())
             active_path = skills_dir / "codex-skill-orchestrator" / "references" / "active-profile.json"
             active = json.loads(active_path.read_text(encoding="utf-8"))
             self.assertEqual(active["profile"]["id"], "universal")
@@ -245,6 +250,151 @@ class EngineTests(unittest.TestCase):
             self.assertTrue(rolled_back["dry_run"])
             self.assertEqual(before_rollback, detailed_snapshot(base))
 
+    def test_audit_does_not_create_skills_state_namespace(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="cso audit no skills state ") as temporary:
+            base = Path(temporary)
+            install_root = base / "install"
+            skills_dir = base / "skills"
+            install_root.mkdir()
+            skills_dir.mkdir()
+            result = audit(install_root, skills_dir, source_root=ROOT)
+            self.assertEqual(result["status"], "clean")
+            self.assertEqual(result["installation"], "not-installed")
+            self.assertFalse((skills_dir / ".cso-state").exists())
+
+    def test_shared_skills_lock_blocks_engine_before_router_mutation(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="cso engine shared skills ") as temporary:
+            base = Path(temporary)
+            install_a = base / "install-a"
+            install_b = base / "install-b"
+            skills_dir = base / "skills"
+            install_a.mkdir()
+            install_b.mkdir()
+            skills_dir.mkdir()
+            ready = base / "ready"
+            release = base / "release"
+            environment = dict(os.environ)
+            environment["PYTHONPATH"] = os.pathsep.join(
+                part for part in (str(ROOT), environment.get("PYTHONPATH")) if part
+            )
+            environment["PYTHONDONTWRITEBYTECODE"] = "1"
+            script = "\n".join(
+                (
+                    "import time",
+                    "from pathlib import Path",
+                    "from skill_orchestrator.mutation_lock import MutationLockSet",
+                    f"install_root = Path({str(install_a)!r})",
+                    f"skills_root = Path({str(skills_dir)!r})",
+                    f"ready = Path({str(ready)!r})",
+                    f"release = Path({str(release)!r})",
+                    "with MutationLockSet.for_engine(install_root, skills_root):",
+                    "    ready.write_text('held', encoding='ascii')",
+                    "    while not release.exists(): time.sleep(0.01)",
+                )
+            )
+            holder = subprocess.Popen(
+                [sys.executable, "-c", script],
+                cwd=str(ROOT),
+                env=environment,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            try:
+                deadline = time.monotonic() + 10
+                while not ready.exists() and time.monotonic() < deadline:
+                    if holder.poll() is not None:
+                        stdout, stderr = holder.communicate()
+                        self.fail("lock holder exited: " + repr((stdout, stderr)))
+                    time.sleep(0.01)
+                self.assertTrue(ready.exists())
+                with self.assertRaises(OperationError) as raised:
+                    apply_profile(
+                        "universal",
+                        install_b,
+                        skills_dir,
+                        source_root=ROOT,
+                    )
+                self.assertEqual(str(raised.exception), "another orchestrator mutation is in progress")
+                self.assertFalse((skills_dir / "codex-skill-orchestrator").exists())
+            finally:
+                release.write_text("release", encoding="ascii")
+                try:
+                    stdout, stderr = holder.communicate(timeout=5)
+                except subprocess.TimeoutExpired:
+                    holder.terminate()
+                    stdout, stderr = holder.communicate(timeout=5)
+                    self.fail("lock holder did not stop: " + repr((stdout, stderr)))
+                self.assertEqual(holder.returncode, 0, stderr)
+
+    def test_shared_skills_lock_blocks_rollback_before_target_mutation(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="cso rollback shared skills ") as temporary:
+            base = Path(temporary)
+            install_root = base / "install"
+            skills_dir = base / "skills"
+            apply_profile("universal", install_root, skills_dir, source_root=ROOT)
+            ready = base / "ready"
+            release = base / "release"
+            environment = dict(os.environ)
+            environment["PYTHONPATH"] = os.pathsep.join(
+                part for part in (str(ROOT), environment.get("PYTHONPATH")) if part
+            )
+            environment["PYTHONDONTWRITEBYTECODE"] = "1"
+            script = "\n".join(
+                (
+                    "import time",
+                    "from pathlib import Path",
+                    "from skill_orchestrator.mutation_lock import MutationLockSet",
+                    f"skills_root = Path({str(skills_dir)!r})",
+                    f"ready = Path({str(ready)!r})",
+                    f"release = Path({str(release)!r})",
+                    "with MutationLockSet.for_skills(skills_root):",
+                    "    ready.write_text('held', encoding='ascii')",
+                    "    while not release.exists(): time.sleep(0.01)",
+                )
+            )
+            holder = subprocess.Popen(
+                [sys.executable, "-c", script],
+                cwd=str(ROOT),
+                env=environment,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            try:
+                deadline = time.monotonic() + 10
+                while not ready.exists() and time.monotonic() < deadline:
+                    if holder.poll() is not None:
+                        stdout, stderr = holder.communicate()
+                        self.fail("lock holder exited: " + repr((stdout, stderr)))
+                    time.sleep(0.01)
+                self.assertTrue(ready.exists())
+                with self.assertRaises(OperationError) as raised:
+                    rollback(install_root, skills_dir, source_root=ROOT)
+                self.assertEqual(str(raised.exception), "another orchestrator mutation is in progress")
+                self.assertTrue((install_root / "app").is_dir())
+                self.assertTrue((skills_dir / "codex-skill-orchestrator").is_dir())
+            finally:
+                release.write_text("release", encoding="ascii")
+                try:
+                    stdout, stderr = holder.communicate(timeout=5)
+                except subprocess.TimeoutExpired:
+                    holder.terminate()
+                    stdout, stderr = holder.communicate(timeout=5)
+                    self.fail("lock holder did not stop: " + repr((stdout, stderr)))
+                self.assertEqual(holder.returncode, 0, stderr)
+
+    def test_rollback_fails_closed_when_skills_root_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="cso rollback missing skills ") as temporary:
+            base = Path(temporary)
+            install_root = base / "install"
+            skills_dir = base / "skills"
+            apply_profile("universal", install_root, skills_dir, source_root=ROOT)
+            shutil.rmtree(skills_dir)
+            with self.assertRaises(SecurityError):
+                rollback(install_root, skills_dir, source_root=ROOT)
+            self.assertTrue((install_root / "app").is_dir())
+
     def test_quarantine_cleanup_failure_keeps_state_consistent(self) -> None:
         with tempfile.TemporaryDirectory(prefix="cso quarantine ") as temporary:
             base = Path(temporary)
@@ -323,11 +473,14 @@ class EngineTests(unittest.TestCase):
     def test_mutation_lock_is_exclusive_and_reusable(self) -> None:
         with tempfile.TemporaryDirectory(prefix="cso lock exclusivity ") as temporary:
             install_root = Path(temporary) / "state"
-            with engine.MutationLock(install_root):
+            skills_dir = Path(temporary) / "skills"
+            install_root.mkdir()
+            skills_dir.mkdir()
+            with MutationLockSet.for_engine(install_root, skills_dir):
                 with self.assertRaises(OperationError):
-                    with engine.MutationLock(install_root):
+                    with MutationLockSet.for_engine(install_root, skills_dir):
                         self.fail("a second mutation lock must not be acquired")
-            with engine.MutationLock(install_root):
+            with MutationLockSet.for_engine(install_root, skills_dir):
                 pass
 
     def test_interrupted_transaction_is_reported_and_recovered(self) -> None:
