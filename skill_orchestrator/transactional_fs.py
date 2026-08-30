@@ -16,7 +16,7 @@ import sys
 import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Protocol, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Protocol, Tuple
 
 
 MAX_SINGLE_FILE_BYTES = 1_048_576
@@ -28,6 +28,7 @@ MAX_PATH_DEPTH = 16
 MAX_SEGMENT_UTF8_BYTES = 100
 
 STAGE_STATUSES = ("staged", "rejected", "invalid", "failed", "cleanup-required")
+STAGE_OBSERVATION_STATUSES = ("matching", "missing", "unsafe", "unstable", "unsupported")
 
 REASON_IDS = (
     "phase5e.fs.input.invalid",
@@ -111,6 +112,15 @@ class StageLeaseOutcome:
 @dataclass(frozen=True)
 class LeaseCleanupResult:
     status: str
+
+
+@dataclass(frozen=True)
+class StageObservation:
+    """A read-only classification of a stage; it never owns that stage."""
+
+    status: str
+    file_count: int
+    total_bytes: Optional[int]
 
 
 class OwnedStageLease:
@@ -745,6 +755,210 @@ def _manifest_digest(records: Tuple[Tuple[str, str, int], ...]) -> str:
         separators=(",", ":"),
     ).encode("utf-8")
     return hashlib.sha256(b"cso-stage-manifest-v1\0" + encoded).hexdigest()
+
+
+def _valid_observation_stage_name(value: object) -> bool:
+    if type(value) is not str or not value or "/" in value or "\\" in value:
+        return False
+    if ".." in value or value.endswith((".", " ")):
+        return False
+    try:
+        value.encode("ascii")
+    except UnicodeEncodeError:
+        return False
+    return all(character.isalnum() or character in "._-" for character in value)
+
+
+def _private_observation_directory(info: os.stat_result, device: int) -> bool:
+    return (
+        stat.S_ISDIR(info.st_mode)
+        and info.st_uid == os.geteuid()
+        and info.st_dev == device
+        and stat.S_IMODE(info.st_mode) == 0o700
+    )
+
+
+def _private_observation_file(info: os.stat_result, device: int) -> bool:
+    return (
+        stat.S_ISREG(info.st_mode)
+        and info.st_uid == os.geteuid()
+        and info.st_dev == device
+        and info.st_nlink == 1
+        and stat.S_IMODE(info.st_mode) == 0o600
+    )
+
+
+class _ObservationUnsafe(Exception):
+    pass
+
+
+class _ObservationUnstable(Exception):
+    pass
+
+
+def inspect_declared_stage(
+    skills_root: Path,
+    stage_name: str,
+    manifest: Any,
+    expected_root_identity: Any,
+    *,
+    limits: Optional[ExecutionLimits] = None,
+) -> StageObservation:
+    """Read and verify one existing stage without creating or owning it.
+
+    The returned classification is observational only.  In particular, a
+    matching result does not recreate an ``OwnedStageLease`` or grant any
+    authority to publish, clean up, or otherwise mutate the stage.
+    """
+
+    try:
+        from .transaction_journal import normalize_exact_manifest
+
+        normalized = normalize_exact_manifest(manifest)
+    except Exception:
+        return StageObservation("unsafe", 0, None)
+    selected_limits = limits if type(limits) is ExecutionLimits else ExecutionLimits()
+    if (
+        not _valid_observation_stage_name(stage_name)
+        or not normalized
+        or len(normalized) > MAX_DECLARED_FILES
+        or sum(entry["size"] for entry in normalized) > selected_limits.max_total_candidate_bytes
+        or any(entry["size"] > selected_limits.max_single_file_bytes for entry in normalized)
+    ):
+        return StageObservation("unsafe", 0, None)
+
+    adapter = RealFilesystemAdapter()
+    if not adapter.secure_staging_supported():
+        return StageObservation("unsupported", 0, None)
+    root_fd = parent_fd = stage_fd = -1
+    try:
+        canonical_root = Path(os.path.realpath(os.fspath(skills_root)))
+        root_fd, _ = adapter._open_absolute_directory(
+            canonical_root, "phase5e.fs.stage.unsafe"
+        )
+        root_before = os.fstat(root_fd)
+        if (
+            not isinstance(expected_root_identity, dict)
+            or expected_root_identity != {
+                "kind": "posix-dev-ino",
+                "device": root_before.st_dev,
+                "inode": root_before.st_ino,
+            }
+            or not stat.S_ISDIR(root_before.st_mode)
+            or root_before.st_uid != os.geteuid()
+            or root_before.st_mode & 0o022
+        ):
+            raise _ObservationUnsafe()
+        try:
+            visible_parent = os.stat(
+                ".cso-staging", dir_fd=root_fd, follow_symlinks=False
+            )
+        except FileNotFoundError:
+            return StageObservation("missing", 0, None)
+        if not _private_observation_directory(visible_parent, root_before.st_dev):
+            raise _ObservationUnsafe()
+        parent_fd = os.open(".cso-staging", _directory_flags(), dir_fd=root_fd)
+        parent_before = os.fstat(parent_fd)
+        if _metadata(visible_parent) != _metadata(parent_before):
+            raise _ObservationUnstable()
+        try:
+            visible_stage = os.stat(stage_name, dir_fd=parent_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            return StageObservation("missing", 0, None)
+        if not _private_observation_directory(visible_stage, parent_before.st_dev):
+            raise _ObservationUnsafe()
+        stage_fd = os.open(stage_name, _directory_flags(), dir_fd=parent_fd)
+        stage_before = os.fstat(stage_fd)
+        if (
+            _metadata(visible_stage) != _metadata(stage_before)
+            or not _private_observation_directory(stage_before, parent_before.st_dev)
+        ):
+            raise _ObservationUnstable()
+
+        expected = {
+            entry["path"]: (entry["sha256"], entry["size"])
+            for entry in normalized
+        }
+        records: List[Tuple[str, str, int]] = []
+
+        def inspect_directory(directory_fd: int, prefix: Tuple[str, ...]) -> None:
+            before = os.fstat(directory_fd)
+            if not _private_observation_directory(before, parent_before.st_dev):
+                raise _ObservationUnsafe()
+            for name in sorted(os.listdir(directory_fd)):
+                visible = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+                relative = prefix + (name,)
+                if stat.S_ISLNK(visible.st_mode):
+                    raise _ObservationUnsafe()
+                if stat.S_ISDIR(visible.st_mode):
+                    if not _private_observation_directory(visible, parent_before.st_dev):
+                        raise _ObservationUnsafe()
+                    child_fd = -1
+                    try:
+                        child_fd = os.open(name, _directory_flags(), dir_fd=directory_fd)
+                        opened = os.fstat(child_fd)
+                        if _metadata(visible) != _metadata(opened):
+                            raise _ObservationUnstable()
+                        inspect_directory(child_fd, relative)
+                    finally:
+                        if child_fd >= 0:
+                            os.close(child_fd)
+                    continue
+                if not _private_observation_file(visible, parent_before.st_dev):
+                    raise _ObservationUnsafe()
+                leaf_fd = -1
+                try:
+                    leaf_fd = os.open(name, _leaf_read_flags(), dir_fd=directory_fd)
+                    opened = os.fstat(leaf_fd)
+                    if _metadata(visible) != _metadata(opened):
+                        raise _ObservationUnstable()
+                    digest = hashlib.sha256()
+                    total = 0
+                    while True:
+                        chunk = os.read(leaf_fd, selected_limits.copy_chunk_bytes)
+                        if not chunk:
+                            break
+                        total += len(chunk)
+                        if total > selected_limits.max_single_file_bytes:
+                            raise _ObservationUnsafe()
+                        digest.update(chunk)
+                    after = os.fstat(leaf_fd)
+                    if _metadata(opened) != _metadata(after) or total != after.st_size:
+                        raise _ObservationUnstable()
+                    records.append(("/".join(relative), digest.hexdigest(), total))
+                finally:
+                    if leaf_fd >= 0:
+                        os.close(leaf_fd)
+            if _metadata(before) != _metadata(os.fstat(directory_fd)):
+                raise _ObservationUnstable()
+
+        inspect_directory(stage_fd, ())
+        actual = {path: (digest, size) for path, digest, size in records}
+        if actual != expected or sum(size for _, _, size in records) > selected_limits.max_total_candidate_bytes:
+            raise _ObservationUnsafe()
+        stage_after = os.fstat(stage_fd)
+        visible_after = os.stat(stage_name, dir_fd=parent_fd, follow_symlinks=False)
+        parent_after = os.fstat(parent_fd)
+        root_after = os.fstat(root_fd)
+        if (
+            _metadata(stage_before) != _metadata(stage_after)
+            or _metadata(stage_before) != _metadata(visible_after)
+            or _metadata(parent_before) != _metadata(parent_after)
+            or _metadata(root_before) != _metadata(root_after)
+        ):
+            raise _ObservationUnstable()
+        return StageObservation("matching", len(records), sum(size for _, _, size in records))
+    except _ObservationUnstable:
+        return StageObservation("unstable", 0, None)
+    except (_ObservationUnsafe, _Rejected, OSError, ValueError):
+        return StageObservation("unsafe", 0, None)
+    finally:
+        if stage_fd >= 0:
+            os.close(stage_fd)
+        if parent_fd >= 0:
+            os.close(parent_fd)
+        if root_fd >= 0:
+            os.close(root_fd)
 
 
 def stage_declared_candidate(
