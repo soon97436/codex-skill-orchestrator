@@ -401,6 +401,33 @@ def advance_durable_journal(skills_root: Path, document: Any) -> Dict[str, Any]:
                     os.close(descriptor)
 
 
+def load_durable_journal(skills_root: Path, transaction_id: str) -> Dict[str, Any]:
+    """Read one validated journal without creating, locking, or repairing state."""
+
+    if not _posix_supported():
+        raise SecurityError("durable candidate journals are unsupported on this platform")
+    transaction_id = validate_transaction_id(transaction_id)
+    root_fd = state_fd = transactions_fd = transaction_fd = -1
+    try:
+        root_fd, root_info = _open_skills_root(skills_root)
+        state_fd, _ = _open_existing_directory(root_fd, STATE_NAME, device=root_info.st_dev)
+        transactions_fd, _ = _open_existing_directory(
+            state_fd, TRANSACTIONS_NAME, device=root_info.st_dev
+        )
+        transaction_fd, _ = _open_existing_directory(
+            transactions_fd, transaction_id, device=root_info.st_dev
+        )
+        _assert_transaction_leaves(transaction_fd)
+        document = _load_journal(transaction_fd, root_info=root_info)
+        if document["transaction_id"] != transaction_id:
+            raise IntegrityError("durable journal transaction directory mismatch")
+        return document
+    finally:
+        for descriptor in (transaction_fd, transactions_fd, state_fd, root_fd):
+            if descriptor >= 0:
+                os.close(descriptor)
+
+
 def _assert_transaction_leaves(transaction_fd: int) -> None:
     try:
         names = os.listdir(transaction_fd)
@@ -498,5 +525,6 @@ __all__ = [
     "RecoveryScan",
     "advance_durable_journal",
     "create_durable_journal",
+    "load_durable_journal",
     "scan_durable_journals",
 ]
