@@ -240,9 +240,22 @@ class MutationLockTests(unittest.TestCase):
             lock.write_text(json.dumps({"pid": 2147483647, "token": "stale"}), encoding="ascii")
             lock.chmod(0o600)
             with MutationLockSet.for_skills(skills):
-                payload = json.loads(lock.read_text(encoding="ascii"))
-                self.assertEqual(set(payload), {"pid", "token"})
-                self.assertNotIn(str(base), lock.read_text(encoding="ascii"))
+                pass
+            # Windows byte-range locking may deny a second handle access to the
+            # locked byte, so inspect the diagnostic payload after release.
+            serialized = lock.read_text(encoding="ascii")
+            payload = json.loads(serialized)
+            self.assertEqual(set(payload), {"pid", "token"})
+            self.assertEqual(payload["pid"], os.getpid())
+            self.assertIsInstance(payload["token"], str)
+            self.assertGreater(len(payload["token"]), 0)
+            self.assertLessEqual(len(payload["token"]), 128)
+            self.assertNotEqual(payload, {"pid": 2147483647, "token": "stale"})
+            self.assertNotIn(str(base), serialized)
+            self.assertNotIn(str(install), serialized)
+            self.assertNotIn(str(skills), serialized)
+            with MutationLockSet.for_skills(skills):
+                pass
 
     @skipUnless(os.name != "nt", "POSIX mode checks are platform-specific")
     def test_domain_namespace_and_lock_modes(self):
