@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
 from .errors import IntegrityError, OperationError, SecurityError, ValidationError
-from .mutation_lock import MutationLockSet
+from .mutation_lock import MutationLockSet, _open_held_skills_root
 from .transaction_journal import (
     TERMINAL_PHASES,
     validate_journal_document,
@@ -344,35 +344,132 @@ def _prepare_write(skills_root: Path, document: Any, *, creating: bool) -> Dict[
     return normalized
 
 
+def _create_durable_journal_locked(
+    normalized: Dict[str, Any],
+    root_fd: int,
+    root_info: os.stat_result,
+) -> Dict[str, Any]:
+    """Write a validated new journal while the caller owns the skills lock."""
+
+    _validate_root_identity(normalized, root_info)
+    state_fd = transactions_fd = transaction_fd = -1
+    try:
+        state_fd, _ = _open_or_create_directory(root_fd, STATE_NAME, device=root_info.st_dev)
+        transactions_fd, _ = _open_or_create_directory(
+            state_fd, TRANSACTIONS_NAME, device=root_info.st_dev
+        )
+        transaction_id = validate_transaction_id(normalized["transaction_id"])
+        try:
+            os.mkdir(transaction_id, 0o700, dir_fd=transactions_fd)
+        except FileExistsError as exc:
+            raise IntegrityError("durable journal transaction already exists") from exc
+        try:
+            os.fsync(transactions_fd)
+        except OSError as exc:
+            raise OperationError("durable journal transaction cannot be synchronized") from exc
+        transaction_fd, _ = _open_existing_directory(
+            transactions_fd, transaction_id, device=root_info.st_dev
+        )
+        _assert_empty_directory(transaction_fd)
+        _write_journal_atomically(transaction_fd, normalized)
+        os.fsync(transactions_fd)
+        return normalized
+    finally:
+        for descriptor in (transaction_fd, transactions_fd, state_fd):
+            if descriptor >= 0:
+                os.close(descriptor)
+
+
+def _advance_durable_journal_locked(
+    normalized: Dict[str, Any],
+    root_fd: int,
+    root_info: os.stat_result,
+) -> Dict[str, Any]:
+    """Advance a validated journal while the caller owns the skills lock."""
+
+    _validate_root_identity(normalized, root_info)
+    state_fd = transactions_fd = transaction_fd = -1
+    try:
+        state_fd, _ = _open_existing_directory(root_fd, STATE_NAME, device=root_info.st_dev)
+        transactions_fd, _ = _open_existing_directory(
+            state_fd, TRANSACTIONS_NAME, device=root_info.st_dev
+        )
+        transaction_id = validate_transaction_id(normalized["transaction_id"])
+        transaction_fd, _ = _open_existing_directory(
+            transactions_fd, transaction_id, device=root_info.st_dev
+        )
+        _assert_transaction_leaves(transaction_fd)
+        current = _load_journal(transaction_fd, root_info=root_info)
+        if current["transaction_id"] != transaction_id:
+            raise IntegrityError("durable journal transaction directory mismatch")
+        _validate_update(current, normalized)
+        _write_journal_atomically(transaction_fd, normalized)
+        return normalized
+    finally:
+        for descriptor in (transaction_fd, transactions_fd, state_fd):
+            if descriptor >= 0:
+                os.close(descriptor)
+
+
+def _prepare_held_write(
+    proof: Any,
+    document: Any,
+    *,
+    creating: bool,
+) -> Tuple[Dict[str, Any], int, os.stat_result]:
+    """Validate a live held-lock proof before opening the write namespace."""
+
+    if not _posix_supported():
+        raise SecurityError("durable candidate journals are unsupported on this platform")
+    normalized = validate_journal_document(document)
+    if creating and normalized["phase"] != "PREPARING":
+        raise ValidationError("durable journal must begin in PREPARING")
+    root_fd, root_info = _open_held_skills_root(
+        proof, normalized["skills_root_identity"]
+    )
+    return normalized, root_fd, root_info
+
+
+def _create_durable_journal_while_holding_skills_lock(
+    proof: Any,
+    document: Any,
+) -> Dict[str, Any]:
+    """Persist a new journal using an already-held skills lock proof."""
+
+    normalized, root_fd, root_info = _prepare_held_write(
+        proof, document, creating=True
+    )
+    try:
+        return _create_durable_journal_locked(normalized, root_fd, root_info)
+    finally:
+        os.close(root_fd)
+
+
+def _advance_durable_journal_while_holding_skills_lock(
+    proof: Any,
+    document: Any,
+) -> Dict[str, Any]:
+    """Advance a journal using an already-held skills lock proof."""
+
+    normalized, root_fd, root_info = _prepare_held_write(
+        proof, document, creating=False
+    )
+    try:
+        return _advance_durable_journal_locked(normalized, root_fd, root_info)
+    finally:
+        os.close(root_fd)
+
+
 def create_durable_journal(skills_root: Path, document: Any) -> Dict[str, Any]:
     """Persist a new PREPARING journal, without inspecting a candidate target."""
 
     normalized = _prepare_write(skills_root, document, creating=True)
     with MutationLockSet.for_skills(skills_root):
         root_fd, root_info = _open_skills_root(skills_root)
-        state_fd = transactions_fd = transaction_fd = -1
         try:
-            _validate_root_identity(normalized, root_info)
-            state_fd, _ = _open_or_create_directory(root_fd, STATE_NAME, device=root_info.st_dev)
-            transactions_fd, _ = _open_or_create_directory(state_fd, TRANSACTIONS_NAME, device=root_info.st_dev)
-            transaction_id = validate_transaction_id(normalized["transaction_id"])
-            try:
-                os.mkdir(transaction_id, 0o700, dir_fd=transactions_fd)
-            except FileExistsError as exc:
-                raise IntegrityError("durable journal transaction already exists") from exc
-            try:
-                os.fsync(transactions_fd)
-            except OSError as exc:
-                raise OperationError("durable journal transaction cannot be synchronized") from exc
-            transaction_fd, _ = _open_existing_directory(transactions_fd, transaction_id, device=root_info.st_dev)
-            _assert_empty_directory(transaction_fd)
-            _write_journal_atomically(transaction_fd, normalized)
-            os.fsync(transactions_fd)
-            return normalized
+            return _create_durable_journal_locked(normalized, root_fd, root_info)
         finally:
-            for descriptor in (transaction_fd, transactions_fd, state_fd, root_fd):
-                if descriptor >= 0:
-                    os.close(descriptor)
+            os.close(root_fd)
 
 
 def advance_durable_journal(skills_root: Path, document: Any) -> Dict[str, Any]:
@@ -381,24 +478,10 @@ def advance_durable_journal(skills_root: Path, document: Any) -> Dict[str, Any]:
     normalized = _prepare_write(skills_root, document, creating=False)
     with MutationLockSet.for_skills(skills_root):
         root_fd, root_info = _open_skills_root(skills_root)
-        state_fd = transactions_fd = transaction_fd = -1
         try:
-            _validate_root_identity(normalized, root_info)
-            state_fd, _ = _open_existing_directory(root_fd, STATE_NAME, device=root_info.st_dev)
-            transactions_fd, _ = _open_existing_directory(state_fd, TRANSACTIONS_NAME, device=root_info.st_dev)
-            transaction_id = validate_transaction_id(normalized["transaction_id"])
-            transaction_fd, _ = _open_existing_directory(transactions_fd, transaction_id, device=root_info.st_dev)
-            _assert_transaction_leaves(transaction_fd)
-            current = _load_journal(transaction_fd, root_info=root_info)
-            if current["transaction_id"] != transaction_id:
-                raise IntegrityError("durable journal transaction directory mismatch")
-            _validate_update(current, normalized)
-            _write_journal_atomically(transaction_fd, normalized)
-            return normalized
+            return _advance_durable_journal_locked(normalized, root_fd, root_info)
         finally:
-            for descriptor in (transaction_fd, transactions_fd, state_fd, root_fd):
-                if descriptor >= 0:
-                    os.close(descriptor)
+            os.close(root_fd)
 
 
 def load_durable_journal(skills_root: Path, transaction_id: str) -> Dict[str, Any]:
