@@ -17,6 +17,7 @@ from skill_orchestrator.transaction_journal import (
     normalize_exact_manifest,
     is_terminal_phase,
     validate_phase_transition,
+    validate_target_key,
     validate_transaction_id,
     validate_journal_document,
 )
@@ -112,6 +113,15 @@ class TransactionJournalTests(unittest.TestCase):
             with self.subTest(value=value):
                 with self.assertRaises(ValidationError):
                     validate_transaction_id(value)
+
+    def test_public_target_key_validator_preserves_journal_contract(self):
+        self.assertEqual(validate_target_key("example-skill"), "example-skill")
+        for value in (".", "..", "a/b", "a\\b", "a:b", "name.", "name ", "CON", "a..b"):
+            with self.subTest(value=value):
+                with self.assertRaises(SecurityError):
+                    validate_target_key(value)
+                with self.assertRaises(SecurityError):
+                    validate_journal_document(_journal(target_key=value))
 
     def test_manifest_is_exact_sorted_duplicate_safe_and_detached(self):
         entries = _manifest()
