@@ -408,6 +408,7 @@ class _MutationResource:
         self.state_fd: Optional[int] = None
         self.lock_fd: Optional[int] = None
         self.state_path: Optional[Path] = None
+        self.root_identity: Optional[Tuple[int, int]] = None
         self.locked = False
 
     def acquire(self) -> None:
@@ -443,6 +444,7 @@ class _MutationResource:
             self.state_fd = state_fd
             self.lock_fd = lock_fd
             self.state_path = state_path if os.name == "nt" else None
+            self.root_identity = _identity(os.fstat(root_fd)) if root_fd is not None else None
             self.locked = True
         except Exception:
             if locked and lock_fd is not None:
@@ -463,6 +465,7 @@ class _MutationResource:
         self.state_fd = None
         self.root_fd = None
         self.state_path = None
+        self.root_identity = None
         self.locked = False
         if lock_fd is not None:
             _release_os_lock(lock_fd)
@@ -480,6 +483,8 @@ class MutationLockSet(AbstractContextManager):
     def __init__(self, resources: Iterable[_MutationResource]) -> None:
         self._resources = _deduplicate_and_sort(resources)
         self._acquired: List[_MutationResource] = []
+        self._skills_lock_token: Optional[object] = None
+        self._skills_lock_proof: Optional["_HeldSkillsLock"] = None
 
     @classmethod
     def for_engine(cls, install_root: Path, skills_root: Path) -> "MutationLockSet":
@@ -511,13 +516,135 @@ class MutationLockSet(AbstractContextManager):
                 resource.release()
             raise
         self._acquired = acquired
+        self._skills_lock_token = object()
+        self._skills_lock_proof = None
         return self
 
     def __exit__(self, exc_type: Any, exc: Any, traceback: Any) -> None:
         acquired = self._acquired
         self._acquired = []
+        self._skills_lock_token = None
+        self._skills_lock_proof = None
         for resource in reversed(acquired):
             resource.release()
+
+    def _held_skills_lock(self) -> "_HeldSkillsLock":
+        """Return an internal proof for the currently held skills lock.
+
+        The proof is deliberately not part of the public lock API.  It is
+        valid only for this active lock-set entry and is tied to the exact
+        skills-domain resource selected by the lock-set factory.
+        """
+
+        token = self._skills_lock_token
+        if token is None or not self._acquired:
+            raise OperationError("skills mutation lock is not actively held")
+        for resource in self._acquired:
+            if resource.skills_state and resource.locked:
+                if self._skills_lock_proof is None:
+                    self._skills_lock_proof = _HeldSkillsLock(self, resource, token)
+                return self._skills_lock_proof
+        raise OperationError("skills mutation lock is not part of this lock set")
+
+
+class _HeldSkillsLock:
+    """Opaque, live-only proof of one active skills mutation-lock ownership."""
+
+    __slots__ = ("__owner", "__resource", "__token")
+
+    def __init__(
+        self,
+        owner: Any,
+        resource: Any,
+        token: Any,
+    ) -> None:
+        self.__owner = owner
+        self.__resource = resource
+        self.__token = token
+
+    def __reduce__(self):
+        raise TypeError("held skills locks are not serializable")
+
+    def __reduce_ex__(self, protocol: int):
+        raise TypeError("held skills locks are not serializable")
+
+    def __copy__(self):
+        raise TypeError("held skills locks are single-owner")
+
+    def __deepcopy__(self, memo: Any):
+        raise TypeError("held skills locks are single-owner")
+
+    def _components(self) -> Tuple[Any, Any, Any]:
+        return self.__owner, self.__resource, self.__token
+
+
+def _open_held_skills_root(
+    proof: Any,
+    expected_identity: Any,
+) -> Tuple[int, os.stat_result]:
+    """Duplicate the root descriptor behind a validated live skills proof.
+
+    This is package-private so durable journal persistence can use the exact
+    descriptor owned by the outer lock instead of reopening a caller path.
+    """
+
+    if type(proof) is not _HeldSkillsLock:
+        raise SecurityError("held skills lock proof is invalid")
+    try:
+        owner, resource, token = proof._components()
+    except AttributeError as exc:
+        raise SecurityError("held skills lock proof is invalid") from exc
+
+    if type(owner) is not MutationLockSet or type(resource) is not _MutationResource:
+        raise SecurityError("held skills lock proof is invalid")
+    if owner._skills_lock_token is not token or token is None:
+        raise SecurityError("held skills lock proof is inactive")
+    if owner._skills_lock_proof is not proof:
+        raise SecurityError("held skills lock proof is not the active owner proof")
+    if not any(item is resource for item in owner._acquired):
+        raise SecurityError("held skills lock proof is not owned by this lock set")
+    if not resource.skills_state or not resource.locked or resource.root_fd is None:
+        raise SecurityError("held skills lock proof is not a skills lock")
+    if (
+        type(expected_identity) is not dict
+        or set(expected_identity) != {"kind", "device", "inode"}
+        or expected_identity.get("kind") != "posix-dev-ino"
+        or type(expected_identity.get("device")) is not int
+        or type(expected_identity.get("inode")) is not int
+    ):
+        raise SecurityError("held skills lock root identity is invalid")
+
+    try:
+        current = os.fstat(resource.root_fd)
+    except OSError as exc:
+        raise SecurityError("held skills lock root descriptor is unavailable") from exc
+    if (
+        not stat.S_ISDIR(current.st_mode)
+        or _is_reparse_info(current)
+        or resource.root_identity != _identity(current)
+        or (expected_identity["device"], expected_identity["inode"])
+        != _identity(current)
+    ):
+        raise SecurityError("held skills lock root identity does not match")
+    if os.name != "nt":
+        uid = _current_uid()
+        if uid is not None and current.st_uid != uid:
+            raise SecurityError("held skills lock root is not owned by the current user")
+        if stat.S_IMODE(current.st_mode) & 0o022:
+            raise SecurityError("held skills lock root is group or world writable")
+
+    try:
+        duplicate = os.dup(resource.root_fd)
+    except OSError as exc:
+        raise SecurityError("held skills lock root descriptor cannot be duplicated") from exc
+    try:
+        duplicate_info = os.fstat(duplicate)
+        if _identity(duplicate_info) != _identity(current):
+            raise SecurityError("held skills lock root descriptor changed during duplication")
+        return duplicate, duplicate_info
+    except Exception:
+        os.close(duplicate)
+        raise
 
 
 def _deduplicate_and_sort(resources: Iterable[_MutationResource]) -> Tuple[_MutationResource, ...]:
