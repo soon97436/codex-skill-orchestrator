@@ -138,7 +138,10 @@ def _manifest_path(value: Any, label: str) -> str:
     return value
 
 
-def _target_key(value: Any, label: str) -> str:
+def validate_target_key(value: Any) -> str:
+    """Validate one portable candidate target leaf without granting authority."""
+
+    label = "target_key"
     if type(value) is not str or _TARGET_KEY_RE.fullmatch(value) is None:
         raise SecurityError("%s must be one portable ASCII segment" % label)
     if value in {".", ".."} or ".." in value or value.endswith((".", " ")):
@@ -349,7 +352,7 @@ def validate_journal_document(document: Any) -> Dict[str, Any]:
     phase = document["phase"]
     if type(phase) is not str or phase not in PHASES:
         raise ValidationError("journal phase is unsupported")
-    target_key = _target_key(document["target_key"], "target_key")
+    target_key = validate_target_key(document["target_key"])
     root_identity = _root_identity(document["skills_root_identity"])
     plan_digest = _sha256(document["plan_digest"], "plan_digest")
     source_identity_digest = _sha256(
