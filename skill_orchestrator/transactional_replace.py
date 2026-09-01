@@ -85,6 +85,8 @@ class TargetStageOutcome:
 class TargetFilesystemAdapter(Protocol):
     def target_state(self, root_fd: int, target_key: str) -> str: ...
 
+    def synchronize_new_staging_namespace(self, root_fd: int) -> None: ...
+
 
 class RealTargetFilesystemAdapter:
     def target_state(self, root_fd: int, target_key: str) -> str:
@@ -95,6 +97,9 @@ class RealTargetFilesystemAdapter:
         except OSError:
             return "unsafe"
         return "existing"
+
+    def synchronize_new_staging_namespace(self, root_fd: int) -> None:
+        os.fsync(root_fd)
 
 
 class _UnsafeNamespace(Exception):
@@ -158,9 +163,13 @@ def _open_root(value: Path) -> Tuple[int, Tuple[int, int]]:
         raise
 
 
-def _open_namespace(root_fd: int, root_identity: Tuple[int, int]) -> Tuple[int, Tuple[int, int]]:
+def _open_namespace(
+    root_fd: int, root_identity: Tuple[int, int]
+) -> Tuple[int, Tuple[int, int], bool]:
+    created = False
     try:
         os.mkdir(".cso-staging", 0o700, dir_fd=root_fd)
+        created = True
     except FileExistsError:
         pass
     except OSError as error:
@@ -175,7 +184,7 @@ def _open_namespace(root_fd: int, root_identity: Tuple[int, int]) -> Tuple[int, 
             raise _UnsafeNamespace()
         if info.st_dev != root_identity[0]:
             raise _CrossDeviceNamespace()
-        return descriptor, (info.st_dev, info.st_ino)
+        return descriptor, (info.st_dev, info.st_ino), created
     except Exception:
         os.close(descriptor)
         raise
@@ -218,7 +227,9 @@ def prepare_target_bound_stage(
                 "existing-unowned" if initial_target == "existing" else "unsafe",
                 "target.exists",
             )
-        namespace_fd, namespace_identity = _open_namespace(root_fd, root_identity)
+        namespace_fd, namespace_identity, namespace_created = _open_namespace(
+            root_fd, root_identity
+        )
         stage_request = StageRequest(
             source_root=request.source_root,
             staging_parent=request.skills_root / ".cso-staging",
@@ -240,6 +251,17 @@ def prepare_target_bound_stage(
                 "cleanup.required" if cleaned.status != "cleaned" else "lease.binding-mismatch",
                 stage=stage_outcome.result,
             )
+        if namespace_created:
+            try:
+                adapter.synchronize_new_staging_namespace(root_fd)
+            except Exception:
+                cleaned = lease.cleanup()
+                return _result(
+                    "cleanup-required" if cleaned.status != "cleaned" else "failed",
+                    "absent",
+                    "cleanup.required" if cleaned.status != "cleaned" else "stage.failed",
+                    stage=stage_outcome.result,
+                )
         final_target = adapter.target_state(root_fd, request.target_key)
         if final_target != "absent":
             cleaned = lease.cleanup()

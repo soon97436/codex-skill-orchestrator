@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import copy
+import os
 import pickle
 import sys
 import tempfile
@@ -29,6 +30,36 @@ class _TargetAppearsOnFinalCheck:
     def target_state(self, root_fd: int, target_key: str) -> str:
         del root_fd, target_key
         return next(self._states)
+
+    def synchronize_new_staging_namespace(self, root_fd: int) -> None:
+        del root_fd
+
+
+class _NamespaceSyncAdapter:
+    """Target-bound staging seam for the newly-created namespace sync only."""
+
+    def __init__(self, *, fail_sync: bool = False) -> None:
+        self.fail_sync = fail_sync
+        self.sync_calls = 0
+        self.root_fd = None
+
+    def target_state(self, root_fd: int, target_key: str) -> str:
+        del root_fd, target_key
+        return "absent"
+
+    def synchronize_new_staging_namespace(self, root_fd: int) -> None:
+        self.root_fd = root_fd
+        self.sync_calls += 1
+        if self.fail_sync:
+            raise OSError("forced skills-root sync failure")
+
+
+class _MissingNamespaceSyncAdapter:
+    """Exercises fail-closed cleanup when an injected adapter lacks the seam."""
+
+    def target_state(self, root_fd: int, target_key: str) -> str:
+        del root_fd, target_key
+        return "absent"
 
 
 @unittest.skipIf(sys.platform == "win32", "POSIX target-bound staging tests")
@@ -178,6 +209,61 @@ class TargetBoundStageTests(unittest.TestCase):
             self.assertTrue(namespace.is_dir())
             self.assertFalse((request.skills_root / request.target_key).exists())
             self.assertEqual(outcome.lease.cleanup().status, "cleaned")
+
+    def test_new_staging_namespace_syncs_skills_root_before_returning_lease(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            request = self._request(Path(temporary).resolve())
+            adapter = _NamespaceSyncAdapter()
+
+            outcome = prepare_target_bound_stage(request, fs=adapter)
+
+            self.assertEqual(outcome.result.status, "prepared")
+            self.assertEqual(adapter.sync_calls, 1)
+            self.assertIsNotNone(outcome.lease)
+            self.assertFalse((request.skills_root / request.target_key).exists())
+            self.assertEqual(outcome.lease.cleanup().status, "cleaned")
+            with self.assertRaises(OSError):
+                os.fstat(adapter.root_fd)
+
+    def test_existing_staging_namespace_does_not_sync_skills_root(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            request = self._request(Path(temporary).resolve())
+            (request.skills_root / ".cso-staging").mkdir(mode=0o700)
+            adapter = _NamespaceSyncAdapter()
+
+            outcome = prepare_target_bound_stage(request, fs=adapter)
+
+            self.assertEqual(outcome.result.status, "prepared")
+            self.assertEqual(adapter.sync_calls, 0)
+            self.assertIsNotNone(outcome.lease)
+            self.assertEqual(outcome.lease.cleanup().status, "cleaned")
+
+    def test_new_staging_namespace_sync_failure_returns_no_lease_and_cleans_stage(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            request = self._request(Path(temporary).resolve())
+            adapter = _NamespaceSyncAdapter(fail_sync=True)
+
+            outcome = prepare_target_bound_stage(request, fs=adapter)
+
+            self.assertEqual(outcome.result.status, "failed")
+            self.assertEqual(outcome.result.reason_ids, ("phase5e.replace.stage.failed",))
+            self.assertEqual(adapter.sync_calls, 1)
+            self.assertIsNone(outcome.lease)
+            self.assertEqual(list((request.skills_root / ".cso-staging").iterdir()), [])
+            self.assertFalse((request.skills_root / request.target_key).exists())
+
+    def test_missing_namespace_sync_seam_fails_closed_and_cleans_stage(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            request = self._request(Path(temporary).resolve())
+
+            outcome = prepare_target_bound_stage(
+                request, fs=_MissingNamespaceSyncAdapter()
+            )
+
+            self.assertEqual(outcome.result.status, "failed")
+            self.assertIsNone(outcome.lease)
+            self.assertEqual(list((request.skills_root / ".cso-staging").iterdir()), [])
+            self.assertFalse((request.skills_root / request.target_key).exists())
 
 
 @unittest.skipUnless(sys.platform == "win32", "Windows target-bound fail-closed tests")

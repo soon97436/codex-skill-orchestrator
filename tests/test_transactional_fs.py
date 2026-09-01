@@ -23,6 +23,7 @@ from skill_orchestrator.transactional_fs import (
     RealFilesystemAdapter,
     StageRequest,
     StageResult,
+    stage_declared_candidate_owned,
     stage_declared_candidate,
 )
 
@@ -192,6 +193,46 @@ class _FaultAdapter(RealFilesystemAdapter):
         return super().cleanup_stage(stage)
 
 
+class _FinalizationAdapter(RealFilesystemAdapter):
+    """Records only the narrow stage-finalization seam used by these tests."""
+
+    def __init__(self, *, fail_at=None, cleanup_fails=False) -> None:
+        super().__init__()
+        self.fail_at = fail_at
+        self.cleanup_fails = cleanup_fails
+        self.events = []
+        self.cleanup_calls = 0
+        self.stage_fd = None
+        self.staging_parent_fd = None
+
+    def flush(self, opened):
+        self.events.append("file")
+        return super().flush(opened)
+
+    def finalize_stage(self, stage):
+        self.stage_fd = stage.fd
+        self.staging_parent_fd = stage.roots.staging_parent_fd
+        return super().finalize_stage(stage)
+
+    def _synchronize_directory(self, descriptor):
+        if descriptor == self.stage_fd:
+            event = "stage-root"
+        elif descriptor == self.staging_parent_fd:
+            event = "staging-parent"
+        else:
+            event = "nested"
+        self.events.append(event)
+        if event == self.fail_at:
+            raise OSError("forced %s sync failure" % event)
+        return super()._synchronize_directory(descriptor)
+
+    def cleanup_stage(self, stage):
+        self.cleanup_calls += 1
+        if self.cleanup_fails:
+            raise OSError("forced cleanup failure")
+        return super().cleanup_stage(stage)
+
+
 @unittest.skipIf(sys.platform == "win32", "POSIX secure staging tests")
 class TransactionalFilesystemTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -307,6 +348,83 @@ class TransactionalFilesystemTests(unittest.TestCase):
         self.assertEqual((staged_roots[0] / "SKILL.md").read_bytes(), payload)
         self.assertEqual(stat.S_IMODE(staged_roots[0].stat().st_mode), 0o700)
         self.assertEqual(stat.S_IMODE((staged_roots[0] / "SKILL.md").stat().st_mode), 0o600)
+
+    def test_required_stage_sync_follows_file_sync_and_is_bottom_up(self) -> None:
+        declared = self.fixture.write("nested/deeper/SKILL.md", b"durable bytes")
+        adapter = _FinalizationAdapter()
+
+        result = stage_declared_candidate(self.fixture.request((declared,)), fs=adapter)
+
+        self.assertEqual(result.status, "staged")
+        self.assertEqual(
+            adapter.events,
+            ["file", "nested", "nested", "stage-root", "staging-parent"],
+        )
+        self.assertEqual(adapter.events[:1], ["file"])
+        self.assertEqual(adapter.events[-2:], ["stage-root", "staging-parent"])
+
+    def test_owned_lease_is_not_returned_until_stage_finalization_succeeds(self) -> None:
+        declared = self.fixture.write("nested/SKILL.md", b"durable bytes")
+        adapter = _FinalizationAdapter()
+
+        outcome = stage_declared_candidate_owned(self.fixture.request((declared,)), fs=adapter)
+
+        self.assertEqual(outcome.result.status, "staged")
+        self.assertIsNotNone(outcome.lease)
+        self.assertEqual(adapter.events[-2:], ["stage-root", "staging-parent"])
+        stage_fd = adapter.stage_fd
+        parent_fd = adapter.staging_parent_fd
+        self.assertEqual(outcome.lease.cleanup().status, "cleaned")
+        for descriptor in (stage_fd, parent_fd):
+            with self.subTest(descriptor=descriptor), self.assertRaises(OSError):
+                os.fstat(descriptor)
+
+    def test_unowned_finalized_stage_releases_finalization_descriptors(self) -> None:
+        declared = self.fixture.write("SKILL.md", b"durable bytes")
+        adapter = _FinalizationAdapter()
+
+        result = stage_declared_candidate(self.fixture.request((declared,)), fs=adapter)
+
+        self.assertEqual(result.status, "staged")
+        for descriptor in (adapter.stage_fd, adapter.staging_parent_fd):
+            with self.subTest(descriptor=descriptor), self.assertRaises(OSError):
+                os.fstat(descriptor)
+
+    def test_each_required_stage_sync_failure_cleans_without_returning_a_lease(self) -> None:
+        for failure in ("nested", "stage-root", "staging-parent"):
+            with self.subTest(failure=failure):
+                fixture = _Fixture()
+                try:
+                    declared = fixture.write("nested/SKILL.md", b"durable bytes")
+                    adapter = _FinalizationAdapter(fail_at=failure)
+                    sentinel = fixture.target / "must-remain-untouched"
+                    sentinel.write_bytes(b"unchanged")
+
+                    outcome = stage_declared_candidate_owned(
+                        fixture.request((declared,)), fs=adapter
+                    )
+
+                    self.assertEqual(outcome.result.status, "failed")
+                    self.assertIsNone(outcome.lease)
+                    self.assertEqual(adapter.cleanup_calls, 1)
+                    self.assertEqual(tuple(fixture.staging.iterdir()), ())
+                    self.assertEqual(sentinel.read_bytes(), b"unchanged")
+                    for descriptor in (adapter.stage_fd, adapter.staging_parent_fd):
+                        with self.assertRaises(OSError):
+                            os.fstat(descriptor)
+                finally:
+                    fixture.close()
+
+    def test_stage_sync_failure_preserves_existing_cleanup_required_semantics(self) -> None:
+        declared = self.fixture.write("SKILL.md", b"durable bytes")
+        adapter = _FinalizationAdapter(fail_at="stage-root", cleanup_fails=True)
+
+        outcome = stage_declared_candidate_owned(self.fixture.request((declared,)), fs=adapter)
+
+        self.assertEqual(outcome.result.status, "cleanup-required")
+        self.assertIsNone(outcome.lease)
+        self.assertEqual(adapter.cleanup_calls, 1)
+        self.assertEqual(len(tuple(self.fixture.staging.iterdir())), 1)
 
     def test_exact_three_file_staging_sorted_manifest_and_undeclared_exclusion(self) -> None:
         values = {"z.txt": b"z", "nested/a.txt": b"aa", "m.txt": b"mmm"}
