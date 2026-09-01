@@ -268,6 +268,8 @@ class FilesystemAdapter(Protocol):
         limits: ExecutionLimits,
     ) -> Tuple[Tuple[str, str, int], ...]: ...
 
+    def finalize_stage(self, stage: _StageHandle) -> None: ...
+
     def cleanup_stage(self, stage: _StageHandle) -> None: ...
 
 
@@ -578,6 +580,36 @@ class RealFilesystemAdapter:
             raise _Rejected("phase5e.fs.stage.verification-failed")
         self._assert_stage_identity(stage)
         return tuple(sorted(records))
+
+    def _synchronize_directory(self, descriptor: int) -> None:
+        """Synchronize one already-open private stage directory."""
+
+        os.fsync(descriptor)
+
+    def _finalize_stage_directory(self, descriptor: int) -> None:
+        """Synchronize nested stage directories bottom-up without reopening paths."""
+
+        for name in sorted(os.listdir(descriptor)):
+            info = os.stat(name, dir_fd=descriptor, follow_symlinks=False)
+            if not stat.S_ISDIR(info.st_mode) or stat.S_ISLNK(info.st_mode):
+                continue
+            child = os.open(name, _directory_flags(), dir_fd=descriptor)
+            try:
+                opened = os.fstat(child)
+                if (opened.st_dev, opened.st_ino) != (info.st_dev, info.st_ino):
+                    raise _Rejected("phase5e.fs.stage.verification-failed")
+                self._finalize_stage_directory(child)
+            finally:
+                os.close(child)
+        self._synchronize_directory(descriptor)
+
+    def finalize_stage(self, stage: _StageHandle) -> None:
+        """Complete the required pre-publication stage directory sync sequence."""
+
+        self._assert_stage_identity(stage)
+        self._finalize_stage_directory(stage.fd)
+        self._assert_stage_identity(stage)
+        self._synchronize_directory(stage.roots.staging_parent_fd)
 
     def _assert_stage_identity(self, stage: _StageHandle) -> None:
         current = os.stat(
@@ -1046,6 +1078,7 @@ def stage_declared_candidate(
                 adapter.close_file(source)
 
         verified = adapter.verify_stage(stage, expected, valid_request.limits)
+        adapter.finalize_stage(stage)
         digest_value = _manifest_digest(verified)
         stage_id = stage.stage_id
         adapter.close_stage(stage)
@@ -1172,6 +1205,7 @@ def stage_declared_candidate_owned(
                     adapter.close_file(destination)
                 adapter.close_file(source)
         verified = adapter.verify_stage(stage, expected, valid_request.limits)
+        adapter.finalize_stage(stage)
         digest_value = _manifest_digest(verified)
         stage_id = stage.stage_id
         if roots.source_fd >= 0:
