@@ -31,8 +31,54 @@ def _directory_flags() -> int:
     return os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0)
 
 
-@unittest.skipUnless(sys.platform in ("darwin", "linux"), "POSIX native adapter tests")
-class PosixNoReplaceTests(unittest.TestCase):
+class CommonContractTests(unittest.TestCase):
+    def test_leaf_contract_is_ascii_single_component_with_255_byte_limit(self) -> None:
+        self.assertEqual(adapter._leaf_bytes(".stage.name", "leaf"), b".stage.name")
+        self.assertEqual(len(adapter._leaf_bytes("a" * 255, "leaf")), 255)
+        for value in ("", ".", "..", "a/b", "a\x00b", "\u00e9", "a" * 256):
+            with self.subTest(value=repr(value)):
+                with self.assertRaises(ValueError):
+                    adapter._leaf_bytes(value, "leaf")
+
+    def test_descriptor_validator_rejects_bool_non_int_and_negative(self) -> None:
+        for value in (True, "3", object()):
+            with self.subTest(value=repr(value)):
+                with self.assertRaises(TypeError):
+                    adapter._descriptor(value, "descriptor")
+        with self.assertRaises(ValueError):
+            adapter._descriptor(-1, "descriptor")
+
+    def test_result_is_frozen_bounded_and_has_no_endpoint_diagnostics(self) -> None:
+        first = NativeNoReplaceResult("linux", "succeeded", True, "succeeded", "native-success")
+        second = NativeNoReplaceResult("linux", "succeeded", True, "succeeded", "native-success")
+        self.assertEqual(first, second)
+        self.assertEqual(copy.copy(first), first)
+        with self.assertRaises(FrozenInstanceError):
+            first.status = "indeterminate"  # type: ignore[misc]
+        self.assertEqual(
+            set(first.__dict__),
+            {"platform", "status", "attempted", "mutation_certainty", "reason_id"},
+        )
+        self.assertNotIn("errno", repr(first))
+        with self.assertRaises(ValueError):
+            NativeNoReplaceResult("linux", "other", True, "succeeded", "native-success")
+
+    def test_vocabularies_are_closed(self) -> None:
+        self.assertEqual(STATUSES[0], "succeeded")
+        self.assertEqual(MUTATION_CERTAINTIES, ("succeeded", "no-mutation", "indeterminate"))
+        self.assertEqual(PLATFORMS, ("darwin", "linux", "unsupported"))
+        self.assertIn("native-indeterminate", REASON_IDS)
+
+    def test_unsupported_platform_dispatch_precedes_endpoint_validation(self) -> None:
+        with patch.object(adapter.sys, "platform", "win32"):
+            result = adapter._move_directory_leaf_no_replace(-1, "", -1, "")
+        self.assertEqual(
+            (result.platform, result.status, result.attempted, result.mutation_certainty),
+            ("unsupported", "unsupported-platform", False, "no-mutation"),
+        )
+
+
+class PosixNativeTestCase(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory(prefix="cso no-replace ")
         self.root = Path(self.temporary.name).resolve()
@@ -62,14 +108,8 @@ class PosixNoReplaceTests(unittest.TestCase):
             self.source_fd, source, self.destination_fd, destination
         )
 
-    def test_leaf_contract_is_ascii_single_component_with_255_byte_limit(self) -> None:
-        self.assertEqual(adapter._leaf_bytes(".stage.name", "leaf"), b".stage.name")
-        self.assertEqual(len(adapter._leaf_bytes("a" * 255, "leaf")), 255)
-        for value in ("", ".", "..", "a/b", "a\x00b", "\u00e9", "a" * 256):
-            with self.subTest(value=repr(value)):
-                with self.assertRaises(ValueError):
-                    adapter._leaf_bytes(value, "leaf")
-
+@unittest.skipUnless(sys.platform in ("darwin", "linux"), "POSIX native adapter tests")
+class PosixNativeCommonTests(PosixNativeTestCase):
     def test_structural_misuse_is_rejected_before_filesystem_access(self) -> None:
         for value in (True, "3", object()):
             with self.subTest(value=repr(value)):
@@ -79,19 +119,6 @@ class PosixNoReplaceTests(unittest.TestCase):
                     )  # type: ignore[arg-type]
         with self.assertRaises(ValueError):
             adapter._move_directory_leaf_no_replace(-1, "source", self.destination_fd, "target")
-
-    def test_result_is_frozen_bounded_and_has_no_endpoint_diagnostics(self) -> None:
-        first = NativeNoReplaceResult("linux", "succeeded", True, "succeeded", "native-success")
-        second = NativeNoReplaceResult("linux", "succeeded", True, "succeeded", "native-success")
-        self.assertEqual(first, second)
-        self.assertEqual(copy.copy(first), first)
-        with self.assertRaises(FrozenInstanceError):
-            first.status = "indeterminate"  # type: ignore[misc]
-        self.assertEqual(set(first.__dict__), {"platform", "status", "attempted", "mutation_certainty", "reason_id"})
-        self.assertNotIn(str(self.source_fd), repr(first))
-        self.assertNotIn(str(self.source_parent), repr(first))
-        with self.assertRaises(ValueError):
-            NativeNoReplaceResult("linux", "other", True, "succeeded", "native-success")
 
     def test_parent_must_be_an_open_directory_and_borrowed_descriptors_remain_open(self) -> None:
         regular = self.root / "regular"
@@ -181,7 +208,10 @@ class PosixNoReplaceTests(unittest.TestCase):
         self.assertEqual(different.status, "succeeded")
         self.assertTrue((self.destination_parent / "different-target").is_dir())
 
-    @unittest.skipUnless(sys.platform == "linux", "Linux renameat2 contract")
+
+
+@unittest.skipUnless(sys.platform == "linux", "Linux renameat2 contract")
+class LinuxNativeTests(PosixNativeTestCase):
     def test_linux_runner_requires_renameat2_symbol_and_conservative_eexist(self) -> None:
         self.assertIsNotNone(adapter._native_function("renameat2"))
         self._make_source()
@@ -190,7 +220,9 @@ class PosixNoReplaceTests(unittest.TestCase):
         self.assertEqual((result.status, result.attempted, result.mutation_certainty), ("destination-exists", True, "indeterminate"))
         self.assertTrue((self.source_parent / ".stage.leaf").is_dir())
 
-    @unittest.skipUnless(sys.platform == "darwin", "Darwin renameatx_np contract")
+
+@unittest.skipUnless(sys.platform == "darwin", "Darwin renameatx_np contract")
+class DarwinNativeTests(PosixNativeTestCase):
     def test_darwin_runner_requires_renameatx_np_symbol_and_safe_eexist(self) -> None:
         self.assertIsNotNone(adapter._native_function("renameatx_np"))
         self._make_source()
@@ -216,12 +248,6 @@ class WindowsFailClosedTests(unittest.TestCase):
 
 
 class StaticScopeTests(unittest.TestCase):
-    def test_vocabularies_are_closed(self) -> None:
-        self.assertEqual(STATUSES[0], "succeeded")
-        self.assertEqual(MUTATION_CERTAINTIES, ("succeeded", "no-mutation", "indeterminate"))
-        self.assertEqual(PLATFORMS, ("darwin", "linux", "unsupported"))
-        self.assertIn("native-indeterminate", REASON_IDS)
-
     def test_module_is_private_and_has_no_production_integration_or_fallback(self) -> None:
         source = Path(adapter.__file__).read_text(encoding="utf-8")
         imports = []
