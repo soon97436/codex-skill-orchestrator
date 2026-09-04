@@ -203,8 +203,7 @@ class OwnedStageLease:
         if self.__state == "consumed":
             if reason_id != "post-rename-sync-failed":
                 raise RuntimeError("owned stage lease taint reason is invalid for its current state")
-            if self.__taint_reason is not None:
-                raise RuntimeError("owned stage lease cannot be tainted from its current state")
+            self.__state = "tainted"
             self.__taint_reason = reason_id
             return
         raise RuntimeError("owned stage lease cannot be tainted from its current state")

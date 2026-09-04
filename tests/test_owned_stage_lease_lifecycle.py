@@ -112,16 +112,25 @@ class OwnedStageLeaseLifecycleTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             lease.consume()
 
-    def test_consumed_sync_failure_preserves_consumed_state(self) -> None:
-        lease, _, _, _ = self._lease()
+    def test_consumed_sync_failure_taints_before_cleanup_or_close(self) -> None:
+        lease, adapter, roots, stage = self._lease()
         lease.consume()
+        self.assertEqual(lease.state, "consumed")
+        self.assertIsNone(lease.taint_reason)
 
         lease.taint("post-rename-sync-failed")
 
-        self.assertEqual(lease.state, "consumed")
+        self.assertEqual(lease.state, "tainted")
         self.assertEqual(lease.taint_reason, "post-rename-sync-failed")
         with self.assertRaises(RuntimeError):
             lease.taint("post-rename-sync-failed")
+        with self.assertRaises(RuntimeError):
+            lease.cleanup()
+        self.assertEqual(adapter.cleanup_calls, 0)
+        lease.close()
+        lease.close()
+        self.assertEqual(stage.fd, -1)
+        self.assertEqual(roots.staging_parent_fd, -1)
 
     def test_active_taints_are_terminal(self) -> None:
         for reason in ("native-outcome-indeterminate", "source-binding-lost"):
@@ -165,6 +174,20 @@ class OwnedStageLeaseLifecycleTests(unittest.TestCase):
                 self.assertFalse(lease._revalidate())
                 self.assertFalse(lease._matches_parent(7, 9))
 
+    def test_every_non_tainted_state_has_no_taint_reason(self) -> None:
+        active, _, _, _ = self._lease()
+        consumed, _, _, _ = self._lease()
+        consumed.consume()
+        cleaned, _, _, _ = self._lease()
+        cleaned.cleanup()
+        required, _, _, _ = self._lease(adapter=_LeaseAdapter(cleanup_fails=True))
+        required.cleanup()
+
+        for lease in (active, consumed, cleaned, required):
+            with self.subTest(state=lease.state):
+                self.assertNotEqual(lease.state, "tainted")
+                self.assertIsNone(lease.taint_reason)
+
     def test_consumed_and_tainted_cleanup_fail_before_adapter_cleanup(self) -> None:
         consumed, consumed_adapter, _, _ = self._lease()
         consumed.consume()
@@ -195,12 +218,12 @@ class OwnedStageLeaseLifecycleTests(unittest.TestCase):
                 self.assertEqual(adapter.close_stage_calls, 1)
                 self.assertEqual(adapter.close_root_calls, [("staging_parent_fd", 102)])
 
-    def test_close_preserves_consumed_taint_reason_and_closes_cleanup_required(self) -> None:
+    def test_close_preserves_tainted_reason_and_closes_cleanup_required(self) -> None:
         consumed, _, consumed_roots, consumed_stage = self._lease()
         consumed.consume()
         consumed.taint("post-rename-sync-failed")
         consumed.close()
-        self.assertEqual(consumed.state, "consumed")
+        self.assertEqual(consumed.state, "tainted")
         self.assertEqual(consumed.taint_reason, "post-rename-sync-failed")
         self.assertEqual(consumed_stage.fd, -1)
         self.assertEqual(consumed_roots.staging_parent_fd, -1)

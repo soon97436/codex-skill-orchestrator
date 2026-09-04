@@ -47,14 +47,15 @@ active -- ordinary cleanup fails ----> cleanup-required
 active -- future definite rename ----> consumed
 active -- native outcome uncertain --> tainted
 active -- source binding lost ------> tainted
-consumed -- parent sync fails ------> consumed + post-rename-sync-failed
+consumed -- parent sync fails ------> tainted + post-rename-sync-failed
 ```
 
-`consumed` permanently retains the fact that a future native publication rename
-definitely succeeded.  A later parent-sync failure records a bounded taint
-reason but does not erase that fact.  A future durable-publication verifier
-failure also leaves the lease consumed; its recovery classification belongs to
-the future PublicationOutcome/journal layers.
+`consumed` means that a future native publication rename definitely departed
+the original staging namespace and revoked publication capability.  A later
+parent-sync failure transitions the lease to `tainted`; the known rename-success
+fact belongs to future PublicationOutcome/journal evidence, not this lease.  A
+future durable-publication verifier failure also leaves lease classification to
+those future layers.
 
 The bounded lifecycle reason identifiers are:
 
@@ -65,8 +66,9 @@ post-rename-sync-failed
 ```
 
 The first two are legal only from `active` and produce `tainted`.  The third is
-legal only from `consumed` and leaves that state unchanged.  There are no
-free-form reasons or PublicationOutcome diagnostics.
+legal only from `consumed` and also produces `tainted`.  `taint_reason` is set
+only when `state` is `tainted`; every other state has no taint reason.  There
+are no free-form reasons or PublicationOutcome diagnostics.
 
 ## Cleanup and close
 
