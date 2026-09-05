@@ -29,6 +29,12 @@ MAX_SEGMENT_UTF8_BYTES = 100
 
 STAGE_STATUSES = ("staged", "rejected", "invalid", "failed", "cleanup-required")
 STAGE_OBSERVATION_STATUSES = ("matching", "missing", "unsafe", "unstable", "unsupported")
+LEASE_STATES = ("active", "cleaned", "cleanup-required", "consumed", "tainted")
+LEASE_TAINT_REASONS = (
+    "native-outcome-indeterminate",
+    "source-binding-lost",
+    "post-rename-sync-failed",
+)
 
 REASON_IDS = (
     "phase5e.fs.input.invalid",
@@ -144,6 +150,7 @@ class OwnedStageLease:
         self.__manifest_digest = manifest_digest
         self.__total_bytes = total_bytes
         self.__state = "active"
+        self.__taint_reason: Optional[str] = None
 
     def __repr__(self) -> str:
         return "OwnedStageLease(state=%r)" % self.__state
@@ -162,6 +169,44 @@ class OwnedStageLease:
 
     def _active(self) -> bool:
         return self.__state == "active"
+
+    @property
+    def state(self) -> str:
+        """Return the bounded semantic lifecycle state."""
+
+        return self.__state
+
+    @property
+    def taint_reason(self) -> Optional[str]:
+        """Return the bounded reason retained after tainting lifecycle authority."""
+
+        return self.__taint_reason
+
+    def consume(self) -> None:
+        """Irreversibly revoke live-stage cleanup and retry authority."""
+
+        if self.__state != "active":
+            raise RuntimeError("owned stage lease cannot be consumed from its current state")
+        self.__state = "consumed"
+
+    def taint(self, reason_id: str) -> None:
+        """Irreversibly revoke ordinary cleanup and retry authority."""
+
+        if type(reason_id) is not str or reason_id not in LEASE_TAINT_REASONS:
+            raise ValueError("owned stage lease taint reason is unsupported")
+        if self.__state == "active":
+            if reason_id not in {"native-outcome-indeterminate", "source-binding-lost"}:
+                raise RuntimeError("owned stage lease taint reason is invalid for its current state")
+            self.__state = "tainted"
+            self.__taint_reason = reason_id
+            return
+        if self.__state == "consumed":
+            if reason_id != "post-rename-sync-failed":
+                raise RuntimeError("owned stage lease taint reason is invalid for its current state")
+            self.__state = "tainted"
+            self.__taint_reason = reason_id
+            return
+        raise RuntimeError("owned stage lease cannot be tainted from its current state")
 
     def _matches_parent(self, device: int, inode: int) -> bool:
         if not self._active():
@@ -187,8 +232,10 @@ class OwnedStageLease:
     def cleanup(self) -> LeaseCleanupResult:
         if self.__state == "cleaned":
             return LeaseCleanupResult("cleaned")
-        if self.__state != "active":
+        if self.__state == "cleanup-required":
             return LeaseCleanupResult("cleanup-required")
+        if self.__state != "active":
+            raise RuntimeError("owned stage lease cannot be cleaned from its current state")
         try:
             self.__adapter.cleanup_stage(self.__stage)
             self.__adapter.close_roots(self.__roots)
@@ -197,6 +244,24 @@ class OwnedStageLease:
             return LeaseCleanupResult("cleanup-required")
         self.__state = "cleaned"
         return LeaseCleanupResult("cleaned")
+
+    def close(self) -> None:
+        """Release owned descriptors without changing the stage namespace."""
+
+        if self.__state == "active":
+            raise RuntimeError("active owned stage lease cannot be closed")
+        first_error: Optional[OSError] = None
+        try:
+            self.__adapter.close_stage(self.__stage)
+        except OSError as error:
+            first_error = error
+        try:
+            self.__adapter.close_roots(self.__roots)
+        except OSError as error:
+            if first_error is None:
+                first_error = error
+        if first_error is not None:
+            raise first_error
 
 
 @dataclass(frozen=True)
@@ -411,9 +476,11 @@ class RealFilesystemAdapter:
             raise
 
     def close_roots(self, roots: _RootHandles) -> None:
-        for descriptor in (roots.source_fd, roots.staging_parent_fd):
+        for field in ("source_fd", "staging_parent_fd"):
+            descriptor = getattr(roots, field)
             if descriptor >= 0:
                 os.close(descriptor)
+                setattr(roots, field, -1)
 
     def create_stage(self, roots: _RootHandles, candidate_key: str) -> _StageHandle:
         stage_id = secrets.token_hex(16)
