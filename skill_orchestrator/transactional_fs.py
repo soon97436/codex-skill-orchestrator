@@ -129,6 +129,29 @@ class StageObservation:
     total_bytes: Optional[int]
 
 
+@dataclass(frozen=True)
+class _RetainedStageIdentityEvidence:
+    """Internal, detached identity evidence from a consumed retained stage."""
+
+    status: str
+    device: Optional[int]
+    inode: Optional[int]
+
+    def __post_init__(self) -> None:
+        if self.status == "matched":
+            if (
+                type(self.device) is not int
+                or self.device < 0
+                or type(self.inode) is not int
+                or self.inode < 0
+            ):
+                raise ValueError("matched retained stage identity evidence is invalid")
+            return
+        if self.status == "unavailable" and self.device is None and self.inode is None:
+            return
+        raise ValueError("retained stage identity evidence is invalid")
+
+
 class OwnedStageLease:
     """Non-serializable, single-owner capability for one verified stage."""
 
@@ -1327,3 +1350,43 @@ def owned_stage_matches_parent(lease: object, device: int, inode: int) -> bool:
         and type(inode) is int
         and lease._matches_parent(device, inode)
     )
+
+
+def _observe_consumed_stage_identity(lease: object) -> _RetainedStageIdentityEvidence:
+    """Read retained-stage identity evidence without exposing its descriptor.
+
+    This is deliberately limited to a consumed lease: it attests only that the
+    still-owned stage descriptor currently names the directory identity recorded
+    when that lease was created.  It neither observes a destination nor changes
+    lease state, descriptor ownership, or namespace state.
+    """
+
+    unavailable = _RetainedStageIdentityEvidence("unavailable", None, None)
+    if type(lease) is not OwnedStageLease or lease.state != "consumed":
+        return unavailable
+    try:
+        stage = lease._OwnedStageLease__stage
+        if type(stage) is not _StageHandle:
+            return unavailable
+        descriptor = stage.fd
+        expected_device = stage.device
+        expected_inode = stage.inode
+        if (
+            type(descriptor) is not int
+            or descriptor < 0
+            or type(expected_device) is not int
+            or expected_device < 0
+            or type(expected_inode) is not int
+            or expected_inode <= 0
+        ):
+            return unavailable
+        current = os.fstat(descriptor)
+        if (
+            not stat.S_ISDIR(current.st_mode)
+            or current.st_dev != expected_device
+            or current.st_ino != expected_inode
+        ):
+            return unavailable
+        return _RetainedStageIdentityEvidence("matched", current.st_dev, current.st_ino)
+    except Exception:
+        return unavailable
