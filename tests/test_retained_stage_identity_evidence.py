@@ -5,10 +5,12 @@ from __future__ import annotations
 import copy
 import os
 import pickle
+import stat
 import tempfile
 import unittest
 from dataclasses import FrozenInstanceError
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import skill_orchestrator.transactional_fs as transactional_fs
@@ -52,37 +54,31 @@ class _LeaseAdapter:
         return ()
 
 
-class RetainedStageIdentityEvidenceTests(unittest.TestCase):
-    def setUp(self) -> None:
-        self.temporary = tempfile.TemporaryDirectory()
-        self.root = Path(self.temporary.name)
-        self.staging = self.root / "staging"
-        self.stage_path = self.staging / ".demo.cso-stage-token"
-        self.staging.mkdir()
-        self.stage_path.mkdir()
-        self.parent_fd = os.open(self.staging, os.O_RDONLY)
-        self.stage_fd = os.open(self.stage_path, os.O_RDONLY)
+def _stat_result(*, directory: bool, device: int, inode: int) -> SimpleNamespace:
+    return SimpleNamespace(
+        st_mode=stat.S_IFDIR if directory else stat.S_IFREG,
+        st_dev=device,
+        st_ino=inode,
+    )
 
-    def tearDown(self) -> None:
-        for descriptor in (getattr(self, "stage_fd", -1), getattr(self, "parent_fd", -1)):
-            if descriptor >= 0:
-                try:
-                    os.close(descriptor)
-                except OSError:
-                    pass
-        self.temporary.cleanup()
+
+class RetainedStageIdentityEvidencePortableTests(unittest.TestCase):
+    """Portable contract tests: no directory descriptor is opened."""
+
+    _DESCRIPTOR = 41
+    _DEVICE = 101
+    _INODE = 202
 
     def _lease(self, *, adapter=None, descriptor=None, device=None, inode=None):
         adapter = _LeaseAdapter() if adapter is None else adapter
-        info = os.fstat(self.stage_fd)
-        roots = _RootHandles(-1, self.parent_fd, "/private/source", "/private/staging")
+        roots = _RootHandles(-1, -1, "/private/source", "/private/staging")
         stage = _StageHandle(
             roots,
             ".demo.cso-stage-token",
             "token",
-            self.stage_fd if descriptor is None else descriptor,
-            info.st_dev if device is None else device,
-            info.st_ino if inode is None else inode,
+            self._DESCRIPTOR if descriptor is None else descriptor,
+            self._DEVICE if device is None else device,
+            self._INODE if inode is None else inode,
         )
         return OwnedStageLease(
             adapter,
@@ -99,31 +95,35 @@ class RetainedStageIdentityEvidenceTests(unittest.TestCase):
         lease.consume()
         return lease, adapter, roots, stage
 
+    def _matching_stat(self) -> SimpleNamespace:
+        return _stat_result(directory=True, device=self._DEVICE, inode=self._INODE)
+
     def test_consumed_lease_returns_retained_fstat_identity(self):
-        lease, _, _, stage = self._consumed_lease()
+        lease, adapter, _, stage = self._consumed_lease()
         before_state = lease.state
         before_reason = lease.taint_reason
 
-        evidence = _observe_consumed_stage_identity(lease)
-        current = os.fstat(stage.fd)
+        with patch("skill_orchestrator.transactional_fs.os.fstat", return_value=self._matching_stat()):
+            evidence = _observe_consumed_stage_identity(lease)
 
-        self.assertEqual(evidence.status, "matched")
-        self.assertEqual((evidence.device, evidence.inode), (current.st_dev, current.st_ino))
-        self.assertEqual((evidence.device, evidence.inode), (stage.device, stage.inode))
+        self.assertEqual((evidence.status, evidence.device, evidence.inode), ("matched", self._DEVICE, self._INODE))
         self.assertEqual(lease.state, before_state)
         self.assertEqual(lease.taint_reason, before_reason)
-        self.assertEqual(stage.fd, self.stage_fd)
+        self.assertEqual(stage.fd, self._DESCRIPTOR)
+        self.assertEqual(adapter.close_stage_calls, 0)
 
     def test_repeated_observation_is_read_only_and_idempotent(self):
         lease, adapter, roots, stage = self._consumed_lease()
-        first = _observe_consumed_stage_identity(lease)
-        second = _observe_consumed_stage_identity(lease)
+        with patch("skill_orchestrator.transactional_fs.os.fstat", return_value=self._matching_stat()) as observed:
+            first = _observe_consumed_stage_identity(lease)
+            second = _observe_consumed_stage_identity(lease)
 
         self.assertEqual(first, second)
+        self.assertEqual(observed.call_count, 2)
         self.assertEqual(lease.state, "consumed")
         self.assertIsNone(lease.taint_reason)
-        self.assertEqual(stage.fd, self.stage_fd)
-        self.assertEqual(roots.staging_parent_fd, self.parent_fd)
+        self.assertEqual(stage.fd, self._DESCRIPTOR)
+        self.assertEqual(roots.staging_parent_fd, -1)
         self.assertEqual(adapter.close_stage_calls, 0)
         self.assertEqual(adapter.close_roots_calls, 0)
 
@@ -143,40 +143,30 @@ class RetainedStageIdentityEvidenceTests(unittest.TestCase):
                 self.assertEqual((evidence.status, evidence.device, evidence.inode), ("unavailable", None, None))
                 self.assertEqual((lease.state, lease.taint_reason), before)
 
-    def test_consumed_closed_or_invalid_descriptor_fails_closed_without_close(self):
-        invalid, invalid_adapter, _, invalid_stage = self._consumed_lease(descriptor=-1)
-        self.assertEqual(_observe_consumed_stage_identity(invalid).status, "unavailable")
-        self.assertEqual(invalid_stage.fd, -1)
-        self.assertEqual(invalid_adapter.close_stage_calls, 0)
+    def test_consumed_sentinel_descriptor_fails_closed_without_close(self):
+        lease, adapter, _, stage = self._consumed_lease(descriptor=-1)
 
-        closed, closed_adapter, _, closed_stage = self._consumed_lease()
-        closed.close()
-        self.stage_fd = -1
-        self.parent_fd = -1
-        self.assertEqual(closed.state, "consumed")
-        self.assertEqual(_observe_consumed_stage_identity(closed).status, "unavailable")
-        self.assertEqual(closed_stage.fd, -1)
-        self.assertEqual(closed_adapter.close_stage_calls, 1)
+        self.assertEqual(_observe_consumed_stage_identity(lease).status, "unavailable")
+        self.assertEqual(stage.fd, -1)
+        self.assertEqual(adapter.close_stage_calls, 0)
 
     def test_fstat_failure_non_directory_and_identity_mismatches_fail_closed(self):
         lease, _, _, _ = self._consumed_lease()
         with patch("skill_orchestrator.transactional_fs.os.fstat", side_effect=OSError):
             self.assertEqual(_observe_consumed_stage_identity(lease).status, "unavailable")
 
-        file_path = self.root / "not-a-directory"
-        file_path.write_bytes(b"fixture")
-        file_fd = os.open(file_path, os.O_RDONLY)
-        self.addCleanup(os.close, file_fd)
-        file_info = os.fstat(file_fd)
-        non_directory, _, _, _ = self._consumed_lease(
-            descriptor=file_fd, device=file_info.st_dev, inode=file_info.st_ino
-        )
-        self.assertEqual(_observe_consumed_stage_identity(non_directory).status, "unavailable")
+        non_directory, _, _, _ = self._consumed_lease()
+        with patch(
+            "skill_orchestrator.transactional_fs.os.fstat",
+            return_value=_stat_result(directory=False, device=self._DEVICE, inode=self._INODE),
+        ):
+            self.assertEqual(_observe_consumed_stage_identity(non_directory).status, "unavailable")
 
-        device_mismatch, _, _, _ = self._consumed_lease(device=os.fstat(self.stage_fd).st_dev + 1)
-        inode_mismatch, _, _, _ = self._consumed_lease(inode=os.fstat(self.stage_fd).st_ino + 1)
-        self.assertEqual(_observe_consumed_stage_identity(device_mismatch).status, "unavailable")
-        self.assertEqual(_observe_consumed_stage_identity(inode_mismatch).status, "unavailable")
+        device_mismatch, _, _, _ = self._consumed_lease(device=self._DEVICE + 1)
+        inode_mismatch, _, _, _ = self._consumed_lease(inode=self._INODE + 1)
+        with patch("skill_orchestrator.transactional_fs.os.fstat", return_value=self._matching_stat()):
+            self.assertEqual(_observe_consumed_stage_identity(device_mismatch).status, "unavailable")
+            self.assertEqual(_observe_consumed_stage_identity(inode_mismatch).status, "unavailable")
 
     def test_result_invariants_are_immutable_and_do_not_expose_capabilities(self):
         matched = _RetainedStageIdentityEvidence("matched", 1, 2)
@@ -193,11 +183,16 @@ class RetainedStageIdentityEvidenceTests(unittest.TestCase):
                 self.assertFalse(hasattr(matched, name))
 
     def test_observation_has_no_namespace_mutation_and_lease_restrictions_remain(self):
-        lease, _, _, _ = self._consumed_lease()
-        before = sorted(path.relative_to(self.root).as_posix() for path in self.root.rglob("*"))
-        self.assertEqual(_observe_consumed_stage_identity(lease).status, "matched")
-        after = sorted(path.relative_to(self.root).as_posix() for path in self.root.rglob("*"))
-        self.assertEqual(after, before)
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            stage = root / "staging" / ".demo.cso-stage-token"
+            stage.mkdir(parents=True)
+            lease, _, _, _ = self._consumed_lease()
+            before = sorted(path.relative_to(root).as_posix() for path in root.rglob("*"))
+            with patch("skill_orchestrator.transactional_fs.os.fstat", return_value=self._matching_stat()):
+                self.assertEqual(_observe_consumed_stage_identity(lease).status, "matched")
+            after = sorted(path.relative_to(root).as_posix() for path in root.rglob("*"))
+            self.assertEqual(after, before)
 
         active, _, _, _ = self._lease()
         with self.assertRaises(TypeError):
@@ -217,6 +212,49 @@ class RetainedStageIdentityEvidenceTests(unittest.TestCase):
         self.assertNotIn("target", helper)
         self.assertNotIn("durable_target", helper)
         self.assertNotIn("publication_outcome", helper)
+
+    @unittest.skipUnless(os.name == "posix", "requires a POSIX directory file descriptor")
+    def test_posix_directory_fd_returns_real_retained_identity(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            staging = Path(temporary) / "staging"
+            stage_path = staging / ".demo.cso-stage-token"
+            stage_path.mkdir(parents=True)
+            parent_fd = os.open(staging, os.O_RDONLY)
+            stage_fd = os.open(stage_path, os.O_RDONLY)
+            stage_info = os.fstat(stage_fd)
+            adapter = _LeaseAdapter()
+            roots = _RootHandles(-1, parent_fd, "/private/source", "/private/staging")
+            stage = _StageHandle(roots, ".demo.cso-stage-token", "token", stage_fd, stage_info.st_dev, stage_info.st_ino)
+            lease = OwnedStageLease(adapter, roots, stage, {"SKILL.md": ("a" * 64, 1)}, ExecutionLimits(), "b" * 64, 1)
+            lease.consume()
+
+            evidence = _observe_consumed_stage_identity(lease)
+
+            self.assertEqual((evidence.status, evidence.device, evidence.inode), ("matched", stage_info.st_dev, stage_info.st_ino))
+            self.assertEqual(stage.fd, stage_fd)
+            self.assertEqual(adapter.close_stage_calls, 0)
+            lease.close()
+
+    @unittest.skipUnless(os.name == "posix", "requires a POSIX directory file descriptor")
+    def test_posix_closed_directory_fd_is_unavailable_without_extra_close(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            staging = Path(temporary) / "staging"
+            stage_path = staging / ".demo.cso-stage-token"
+            stage_path.mkdir(parents=True)
+            parent_fd = os.open(staging, os.O_RDONLY)
+            stage_fd = os.open(stage_path, os.O_RDONLY)
+            stage_info = os.fstat(stage_fd)
+            adapter = _LeaseAdapter()
+            roots = _RootHandles(-1, parent_fd, "/private/source", "/private/staging")
+            stage = _StageHandle(roots, ".demo.cso-stage-token", "token", stage_fd, stage_info.st_dev, stage_info.st_ino)
+            lease = OwnedStageLease(adapter, roots, stage, {"SKILL.md": ("a" * 64, 1)}, ExecutionLimits(), "b" * 64, 1)
+            lease.consume()
+            lease.close()
+
+            self.assertEqual(lease.state, "consumed")
+            self.assertEqual(_observe_consumed_stage_identity(lease).status, "unavailable")
+            self.assertEqual(stage.fd, -1)
+            self.assertEqual(adapter.close_stage_calls, 1)
 
 
 if __name__ == "__main__":
